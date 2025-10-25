@@ -89,6 +89,11 @@ const Settings: React.FC = () => {
   const handleConfigChange = (key: keyof AppConfig, value: any) => {
     if (config) {
       setConfig({ ...config, [key]: value })
+      
+      // 如果是主题设置，立即应用主题变化
+      if (key === 'theme') {
+        setTheme(value)
+      }
     }
   }
 

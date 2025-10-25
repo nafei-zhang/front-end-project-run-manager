@@ -24,7 +24,7 @@ const Layout: React.FC = () => {
       {/* 侧边栏 */}
       <div className="w-64 bg-card border-r border-border flex flex-col">
         {/* 标题 */}
-        <div className="p-6 border-b border-border">
+        <div className="p-6 border-b border-border drag-region">
           <div className="flex items-center space-x-3">
             <Monitor className="w-8 h-8 text-primary" />
             <div>
