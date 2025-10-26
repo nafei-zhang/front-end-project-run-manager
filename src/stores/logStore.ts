@@ -20,6 +20,7 @@ interface LogStore {
   clearProjectLogs: (projectId: string) => void
   clearAllLogs: () => void
   loadLogs: (projectId: string) => Promise<void>
+  refreshLogs: (projectId: string) => Promise<void>
   setFilter: (filter: Partial<LogStore['filter']>) => void
   getFilteredLogs: (projectId: string) => LogEntry[]
 }
@@ -94,6 +95,24 @@ export const useLogStore = create<LogStore>((set, get) => ({
       }
     } catch (error) {
       console.error('Failed to load logs:', error)
+    }
+  },
+
+  refreshLogs: async (projectId) => {
+    try {
+      if (window.electronAPI) {
+        const logs = await window.electronAPI.logs.getMemoryLogs(projectId)
+        const { logs: currentLogs } = get()
+        
+        set({
+          logs: {
+            ...currentLogs,
+            [projectId]: logs
+          }
+        })
+      }
+    } catch (error) {
+      console.error('Failed to refresh logs:', error)
     }
   },
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useProjectStore } from '../stores/projectStore'
 import { useLogStore } from '../stores/logStore'
+import { useToast } from '../hooks/useToast'
 import { 
   Search, 
   Trash2, 
@@ -8,12 +9,14 @@ import {
   AlertCircle,
   Info,
   AlertTriangle,
-  Terminal
+  Terminal,
+  RefreshCw
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 const Logs: React.FC = () => {
   const { t } = useTranslation()
+  const { showToast } = useToast()
   const { projects } = useProjectStore()
   const { 
     activeProjectId, 
@@ -21,10 +24,12 @@ const Logs: React.FC = () => {
     setActiveProject, 
     clearProjectLogs, 
     setFilter, 
-    getFilteredLogs 
+    getFilteredLogs,
+    refreshLogs
   } = useLogStore()
 
   const [searchInput, setSearchInput] = useState(filter.search)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   useEffect(() => {
     // 如果没有选中项目且有项目列表，默认选择第一个
@@ -71,6 +76,22 @@ const Logs: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
+  const handleRefreshLogs = async () => {
+    if (!activeProjectId || isRefreshing) return
+    
+    setIsRefreshing(true)
+    try {
+      await refreshLogs(activeProjectId)
+      console.log('Logs refreshed successfully')
+      showToast('success', t('logs.refreshSuccess'), t('logs.refreshSuccessDesc'))
+    } catch (error) {
+      console.error('Failed to refresh logs:', error)
+      showToast('error', t('logs.refreshError'), t('logs.refreshErrorDesc'))
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
   const getLevelIcon = (level: string) => {
     switch (level) {
       case 'error':
@@ -106,6 +127,33 @@ const Logs: React.FC = () => {
             <p className="text-muted-foreground">{t('logs.subtitle')}</p>
           </div>
           <div className="flex items-center space-x-3">
+            <button
+              onClick={handleRefreshLogs}
+              disabled={!activeProjectId || isRefreshing}
+              className={`
+                group relative flex items-center space-x-2 px-4 py-2 
+                bg-secondary text-secondary-foreground rounded-lg 
+                transition-all duration-200 ease-in-out
+                hover:bg-secondary/80 hover:scale-[1.02] hover:shadow-md
+                active:scale-[0.98]
+                disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
+                ${isRefreshing ? 'cursor-wait' : ''}
+              `}
+            >
+              <RefreshCw 
+                className={`
+                  w-4 h-4 transition-transform duration-200
+                  ${isRefreshing ? 'animate-spin text-blue-500' : 'group-hover:rotate-90'}
+                `} 
+              />
+              <span className="font-medium transition-colors duration-200">
+                {t('projects.refreshStatus')}
+              </span>
+              {/* 简化的加载状态指示器 */}
+              {isRefreshing && (
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+              )}
+            </button>
             <button
               onClick={handleExportLogs}
               disabled={!activeProjectId || filteredLogs.length === 0}
