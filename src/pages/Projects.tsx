@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react'
 import { useProjectStore } from '../stores/projectStore'
-import { useLogStore } from '../stores/logStore'
 import { useToast } from '../hooks/useToast'
 import { 
   Play, 
@@ -11,19 +10,16 @@ import {
   CheckCircle,
   Clock,
   FolderOpen,
-  Terminal,
   Edit,
   Trash2,
   Search,
   Filter
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import ProjectForm from '../components/ProjectForm'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { useTranslation } from 'react-i18next'
 
 const Projects: React.FC = () => {
-  const navigate = useNavigate()
   const { showToast } = useToast()
   const { t } = useTranslation()
   const { 
