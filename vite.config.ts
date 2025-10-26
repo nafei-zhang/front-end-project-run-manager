@@ -5,6 +5,7 @@ import renderer from 'vite-plugin-electron-renderer'
 import { resolve } from 'path'
 
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     electron([
@@ -43,12 +44,34 @@ export default defineConfig({
     ]),
     renderer()
   ],
+  css: {
+    postcss: './postcss.config.js'
+  },
+  build: {
+    minify: false,
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+        assetFileNames: 'assets/[name]-[hash][extname]',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        compact: false,
+        generatedCode: {
+          constBindings: false
+        }
+      },
+      plugins: []
+    }
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src')
     }
   },
   server: {
-    port: 5173
+    port: 5173,
+    host: true
   }
 })
