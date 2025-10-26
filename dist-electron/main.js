@@ -173,11 +173,18 @@ class ProcessManager {
       }
       const command = this.buildCommand(project.packageManager, project.startCommand);
       console.log("[ProcessManager] Starting command:", command.cmd, command.args.join(" "));
+      console.log("[ProcessManager] Working directory:", project.path);
+      console.log("[ProcessManager] Environment NODE_ENV:", process.env.NODE_ENV || "undefined");
       const childProcess = child_process.spawn(command.cmd, command.args, {
         cwd: project.path,
         stdio: ["pipe", "pipe", "pipe"],
         shell: true,
-        env: { ...process.env, FORCE_COLOR: "1" }
+        env: {
+          ...process.env,
+          FORCE_COLOR: "1",
+          // 确保 PATH 包含常见的 Node.js 和包管理器路径
+          PATH: this.getEnhancedPath()
+        }
       });
       if (!childProcess.pid) {
         console.log("[ProcessManager] Failed to get PID from child process");
@@ -354,15 +361,78 @@ class ProcessManager {
       const parts = startCommand.trim().split(/\s+/);
       return { cmd: parts[0], args: parts.slice(1) };
     }
+    const isProduction = process.env.NODE_ENV === "production" || !process.env.NODE_ENV;
     switch (packageManager) {
       case "pnpm":
-        return { cmd: "pnpm", args: ["run", startCommand] };
+        const pnpmCmd = isProduction ? this.getCommandPath("pnpm") : "pnpm";
+        return { cmd: pnpmCmd, args: ["run", startCommand] };
       case "yarn":
-        return { cmd: "yarn", args: [startCommand] };
+        const yarnCmd = isProduction ? this.getCommandPath("yarn") : "yarn";
+        return { cmd: yarnCmd, args: [startCommand] };
       case "npm":
       default:
-        return { cmd: "npm", args: ["run", startCommand] };
+        const npmCmd = isProduction ? this.getCommandPath("npm") : "npm";
+        return { cmd: npmCmd, args: ["run", startCommand] };
     }
+  }
+  getCommandPath(command) {
+    const { execSync } = require("child_process");
+    try {
+      const fullPath = execSync(`which ${command}`, { encoding: "utf8" }).trim();
+      if (fullPath) {
+        console.log(`[ProcessManager] Found ${command} at: ${fullPath}`);
+        return fullPath;
+      }
+    } catch (error) {
+      console.warn(`[ProcessManager] Could not find ${command} using 'which', trying common paths`);
+    }
+    const fs2 = require("fs");
+    const path2 = require("path");
+    const commonPaths = [
+      `/usr/local/bin/${command}`,
+      `/opt/homebrew/bin/${command}`,
+      `/usr/bin/${command}`,
+      `${process.env.HOME}/.volta/bin/${command}`
+    ];
+    const homeDir = process.env.HOME || "";
+    if (homeDir) {
+      try {
+        const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
+        if (fs2.existsSync(nvmDir)) {
+          const versions = fs2.readdirSync(nvmDir);
+          for (const version of versions) {
+            const binPath = path2.join(nvmDir, version, "bin", command);
+            commonPaths.push(binPath);
+          }
+        }
+      } catch (error) {
+        console.warn("[ProcessManager] Failed to scan NVM paths:", error);
+      }
+      try {
+        const fnmDir = path2.join(homeDir, ".fnm", "node-versions");
+        if (fs2.existsSync(fnmDir)) {
+          const versions = fs2.readdirSync(fnmDir);
+          for (const version of versions) {
+            const binPath = path2.join(fnmDir, version, "installation", "bin", command);
+            commonPaths.push(binPath);
+          }
+        }
+      } catch (error) {
+        console.warn("[ProcessManager] Failed to scan FNM paths:", error);
+      }
+    }
+    for (const cmdPath of commonPaths) {
+      try {
+        if (fs2.existsSync(cmdPath)) {
+          console.log(`[ProcessManager] Found ${command} at: ${cmdPath}`);
+          return cmdPath;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    console.warn(`[ProcessManager] Could not find full path for ${command}, using original command`);
+    return command;
   }
   setupLogListeners(projectId, childProcess) {
     var _a, _b;
@@ -448,6 +518,62 @@ class ProcessManager {
     const errorKeywords = ["error", "failed", "exception", "cannot", "unable"];
     const lowerMessage = message.toLowerCase();
     return errorKeywords.some((keyword) => lowerMessage.includes(keyword));
+  }
+  getEnhancedPath() {
+    const currentPath = process.env.PATH || "";
+    const additionalPaths = [
+      "/usr/local/bin",
+      "/opt/homebrew/bin",
+      "/usr/bin",
+      "/bin"
+    ];
+    const homeDir = process.env.HOME || "";
+    if (homeDir) {
+      const fs22 = require("fs");
+      const path2 = require("path");
+      try {
+        const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
+        if (fs22.existsSync(nvmDir)) {
+          const versions = fs22.readdirSync(nvmDir);
+          for (const version of versions) {
+            const binPath = path2.join(nvmDir, version, "bin");
+            if (fs22.existsSync(binPath)) {
+              additionalPaths.push(binPath);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("[ProcessManager] Failed to resolve NVM paths:", error);
+      }
+      additionalPaths.push(`${homeDir}/.volta/bin`);
+      try {
+        const fnmDir = path2.join(homeDir, ".fnm", "node-versions");
+        if (fs22.existsSync(fnmDir)) {
+          const versions = fs22.readdirSync(fnmDir);
+          for (const version of versions) {
+            const binPath = path2.join(fnmDir, version, "installation", "bin");
+            if (fs22.existsSync(binPath)) {
+              additionalPaths.push(binPath);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("[ProcessManager] Failed to resolve FNM paths:", error);
+      }
+    }
+    const fs2 = require("fs");
+    const uniquePaths = [.../* @__PURE__ */ new Set([currentPath, ...additionalPaths])].filter((pathStr) => {
+      if (!pathStr)
+        return false;
+      try {
+        return fs2.existsSync(pathStr);
+      } catch {
+        return false;
+      }
+    });
+    const enhancedPath = uniquePaths.join(":");
+    console.log(`[ProcessManager] Enhanced PATH: ${enhancedPath}`);
+    return enhancedPath;
   }
 }
 class LogManager {

@@ -35,13 +35,20 @@ export class ProcessManager {
       // 构建命令
       const command = this.buildCommand(project.packageManager, project.startCommand)
       console.log('[ProcessManager] Starting command:', command.cmd, command.args.join(' '))
+      console.log('[ProcessManager] Working directory:', project.path)
+      console.log('[ProcessManager] Environment NODE_ENV:', process.env.NODE_ENV || 'undefined')
       
       // 启动进程
       const childProcess = spawn(command.cmd, command.args, {
         cwd: project.path,
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
-        env: { ...process.env, FORCE_COLOR: '1' }
+        env: { 
+          ...process.env, 
+          FORCE_COLOR: '1',
+          // 确保 PATH 包含常见的 Node.js 和包管理器路径
+          PATH: this.getEnhancedPath()
+        }
       })
 
       if (!childProcess.pid) {
@@ -275,15 +282,94 @@ export class ProcessManager {
     }
     
     // 向后兼容：如果只是简单的命令名，使用原有的包管理器逻辑
+    // 在生产环境中使用完整路径来避免 PATH 问题
+    const isProduction = process.env.NODE_ENV === 'production' || !process.env.NODE_ENV
+    
     switch (packageManager) {
       case 'pnpm':
-        return { cmd: 'pnpm', args: ['run', startCommand] }
+        const pnpmCmd = isProduction ? this.getCommandPath('pnpm') : 'pnpm'
+        return { cmd: pnpmCmd, args: ['run', startCommand] }
       case 'yarn':
-        return { cmd: 'yarn', args: [startCommand] }
+        const yarnCmd = isProduction ? this.getCommandPath('yarn') : 'yarn'
+        return { cmd: yarnCmd, args: [startCommand] }
       case 'npm':
       default:
-        return { cmd: 'npm', args: ['run', startCommand] }
+        const npmCmd = isProduction ? this.getCommandPath('npm') : 'npm'
+        return { cmd: npmCmd, args: ['run', startCommand] }
     }
+  }
+
+  private getCommandPath(command: string): string {
+    const { execSync } = require('child_process')
+    
+    try {
+      // 尝试使用 which 命令找到完整路径
+      const fullPath = execSync(`which ${command}`, { encoding: 'utf8' }).trim()
+      if (fullPath) {
+        console.log(`[ProcessManager] Found ${command} at: ${fullPath}`)
+        return fullPath
+      }
+    } catch (error) {
+      console.warn(`[ProcessManager] Could not find ${command} using 'which', trying common paths`)
+    }
+    
+    // 如果 which 失败，尝试常见的路径
+    const fs = require('fs')
+    const path = require('path')
+    
+    const commonPaths = [
+      `/usr/local/bin/${command}`,
+      `/opt/homebrew/bin/${command}`,
+      `/usr/bin/${command}`,
+      `${process.env.HOME}/.volta/bin/${command}`
+    ]
+    
+    // 添加 NVM 和 FNM 路径（手动遍历目录）
+    const homeDir = process.env.HOME || ''
+    if (homeDir) {
+      try {
+        // NVM 路径
+        const nvmDir = path.join(homeDir, '.nvm', 'versions', 'node')
+        if (fs.existsSync(nvmDir)) {
+          const versions = fs.readdirSync(nvmDir)
+          for (const version of versions) {
+            const binPath = path.join(nvmDir, version, 'bin', command)
+            commonPaths.push(binPath)
+          }
+        }
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to scan NVM paths:', error)
+      }
+      
+      try {
+        // FNM 路径
+        const fnmDir = path.join(homeDir, '.fnm', 'node-versions')
+        if (fs.existsSync(fnmDir)) {
+          const versions = fs.readdirSync(fnmDir)
+          for (const version of versions) {
+            const binPath = path.join(fnmDir, version, 'installation', 'bin', command)
+            commonPaths.push(binPath)
+          }
+        }
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to scan FNM paths:', error)
+      }
+    }
+    
+    for (const cmdPath of commonPaths) {
+      try {
+        if (fs.existsSync(cmdPath)) {
+          console.log(`[ProcessManager] Found ${command} at: ${cmdPath}`)
+          return cmdPath
+        }
+      } catch (error) {
+        continue
+      }
+    }
+    
+    // 如果都找不到，返回原始命令名，让系统尝试
+    console.warn(`[ProcessManager] Could not find full path for ${command}, using original command`)
+    return command
   }
 
   private setupLogListeners(projectId: string, childProcess: ChildProcess): void {
@@ -401,5 +487,75 @@ export class ProcessManager {
     const errorKeywords = ['error', 'failed', 'exception', 'cannot', 'unable']
     const lowerMessage = message.toLowerCase()
     return errorKeywords.some(keyword => lowerMessage.includes(keyword))
+  }
+
+  private getEnhancedPath(): string {
+    const currentPath = process.env.PATH || ''
+    
+    // 获取系统中所有可能的 Node.js 和包管理器路径
+    const additionalPaths = [
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      '/bin'
+    ]
+    
+    // 添加 Node.js 版本管理器的路径
+    const homeDir = process.env.HOME || ''
+    if (homeDir) {
+      const fs = require('fs')
+      const path = require('path')
+      
+      // NVM 路径
+      try {
+        const nvmDir = path.join(homeDir, '.nvm', 'versions', 'node')
+        if (fs.existsSync(nvmDir)) {
+          const versions = fs.readdirSync(nvmDir)
+          for (const version of versions) {
+            const binPath = path.join(nvmDir, version, 'bin')
+            if (fs.existsSync(binPath)) {
+              additionalPaths.push(binPath)
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to resolve NVM paths:', error)
+      }
+      
+      // Volta 路径
+      additionalPaths.push(`${homeDir}/.volta/bin`)
+      
+      // FNM 路径
+      try {
+        const fnmDir = path.join(homeDir, '.fnm', 'node-versions')
+        if (fs.existsSync(fnmDir)) {
+          const versions = fs.readdirSync(fnmDir)
+          for (const version of versions) {
+            const binPath = path.join(fnmDir, version, 'installation', 'bin')
+            if (fs.existsSync(binPath)) {
+              additionalPaths.push(binPath)
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to resolve FNM paths:', error)
+      }
+    }
+    
+    // 去重并过滤存在的路径
+    const fs = require('fs')
+    const uniquePaths = [...new Set([currentPath, ...additionalPaths])]
+      .filter(pathStr => {
+        if (!pathStr) return false
+        try {
+          return fs.existsSync(pathStr)
+        } catch {
+          return false
+        }
+      })
+    
+    const enhancedPath = uniquePaths.join(':')
+    console.log(`[ProcessManager] Enhanced PATH: ${enhancedPath}`)
+    return enhancedPath
   }
 }
