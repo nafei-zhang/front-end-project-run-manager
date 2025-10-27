@@ -9,7 +9,7 @@ mkdir electron-offline
 cd electron-offline
 
 # 下载项目依赖（包括Electron）
-npm pack electron@27.0.0
+npm pack electron@27.3.11
 npm pack electron-builder@24.0.0
 
 # 或者下载整个node_modules
@@ -23,7 +23,7 @@ tar -czf node_modules.tar.gz node_modules/
 ### 步骤3：离线安装
 ```bash
 # 安装预下载的包
-npm install electron-27.0.0.tgz
+npm install electron-27.3.11.tgz
 npm install electron-builder-24.0.0.tgz
 
 # 或者解压node_modules
@@ -34,18 +34,18 @@ tar -xzf node_modules.tar.gz
 
 ### 步骤1：下载Electron二进制文件
 从GitHub Release页面下载：
-- URL: https://github.com/electron/electron/releases/tag/v27.0.0
-- 文件: electron-v27.0.0-win32-x64.zip
+- URL: https://github.com/electron/electron/releases/tag/v27.3.11
+- 文件: electron-v27.3.11-win32-x64.zip
 
 ### 步骤2：设置环境变量
 ```cmd
 set ELECTRON_CACHE=C:\electron-cache
-set ELECTRON_CUSTOM_DIR=27.0.0
+set ELECTRON_CUSTOM_DIR=27.3.11
 ```
 
 ### 步骤3：放置文件
 将下载的zip文件放到：
-`C:\electron-cache\27.0.0\electron-v27.0.0-win32-x64.zip`
+`C:\electron-cache\27.3.11\electron-v27.3.11-win32-x64.zip`
 
 ## 方案三：使用离线npm registry
 
@@ -96,7 +96,7 @@ pnpm install --offline --frozen-lockfile
 
 ## 注意事项
 
-1. 确保下载的Electron版本与package.json中的版本一致（27.0.0）
+1. 确保下载的Electron版本与package.json中的版本一致（27.3.11）
 2. Windows 11需要对应的win32-x64架构
 3. 如果使用electron-builder，也需要离线安装相关依赖
 4. 建议在离线安装前先清理npm缓存：`npm cache clean --force`

@@ -12,8 +12,8 @@ cd offline-packages
 echo Downloading Electron related packages...
 
 REM Download main Electron packages
-echo Downloading electron@27.0.0...
-call npm pack electron@27.0.0
+echo Downloading electron@27.3.11...
+call npm pack electron@27.3.11
 
 echo Downloading electron-builder@24.0.0...
 call npm pack electron-builder@24.0.0
@@ -42,14 +42,14 @@ if exist "node_modules" (
 echo Setting up Electron cache directory...
 REM Create Electron cache directory
 if not exist "electron-cache" mkdir "electron-cache"
-if not exist "electron-cache\27.0.0" mkdir "electron-cache\27.0.0"
+if not exist "electron-cache\27.3.11" mkdir "electron-cache\27.3.11"
 
 REM Manual download instructions for Electron binary
 echo ================================
 echo Manual Steps Required:
-echo 1. Visit: https://github.com/electron/electron/releases/tag/v27.0.0
-echo 2. Download: electron-v27.0.0-win32-x64.zip
-echo 3. Place file in: electron-cache\27.0.0\
+echo 1. Visit: https://github.com/electron/electron/releases/tag/v27.3.11
+echo 2. Download: electron-v27.3.11-win32-x64.zip
+echo 3. Place file in: electron-cache\27.3.11\
 echo ================================
 
 echo Creating transfer package...

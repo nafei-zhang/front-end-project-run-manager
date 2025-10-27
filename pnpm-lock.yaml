@@ -61,7 +61,7 @@ importers:
         specifier: ^8.0.0
         version: 8.2.2
       electron:
-        specifier: ^27.0.0
+        specifier: ^27.3.11
         version: 27.3.11
       electron-builder:
         specifier: ^24.0.0
