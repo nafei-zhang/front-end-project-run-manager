@@ -377,48 +377,74 @@ class ProcessManager {
   }
   getCommandPath(command) {
     const { execSync } = require("child_process");
-    try {
-      const fullPath = execSync(`which ${command}`, { encoding: "utf8" }).trim();
-      if (fullPath) {
-        console.log(`[ProcessManager] Found ${command} at: ${fullPath}`);
-        return fullPath;
-      }
-    } catch (error) {
-      console.warn(`[ProcessManager] Could not find ${command} using 'which', trying common paths`);
-    }
     const fs2 = require("fs");
     const path2 = require("path");
-    const commonPaths = [
-      `/usr/local/bin/${command}`,
-      `/opt/homebrew/bin/${command}`,
-      `/usr/bin/${command}`,
-      `${process.env.HOME}/.volta/bin/${command}`
-    ];
-    const homeDir = process.env.HOME || "";
-    if (homeDir) {
-      try {
-        const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
-        if (fs2.existsSync(nvmDir)) {
-          const versions = fs2.readdirSync(nvmDir);
-          for (const version of versions) {
-            const binPath = path2.join(nvmDir, version, "bin", command);
-            commonPaths.push(binPath);
-          }
-        }
-      } catch (error) {
-        console.warn("[ProcessManager] Failed to scan NVM paths:", error);
+    const os = require("os");
+    const isWindows = process.platform === "win32";
+    const commandWithExt = isWindows ? `${command}.cmd` : command;
+    try {
+      const findCommand = isWindows ? "where" : "which";
+      const fullPath = execSync(`${findCommand} ${command}`, { encoding: "utf8" }).trim();
+      if (fullPath) {
+        const firstPath = fullPath.split("\n")[0].trim();
+        console.log(`[ProcessManager] Found ${command} at: ${firstPath}`);
+        return firstPath;
       }
-      try {
-        const fnmDir = path2.join(homeDir, ".fnm", "node-versions");
-        if (fs2.existsSync(fnmDir)) {
-          const versions = fs2.readdirSync(fnmDir);
-          for (const version of versions) {
-            const binPath = path2.join(fnmDir, version, "installation", "bin", command);
-            commonPaths.push(binPath);
+    } catch (error) {
+      console.warn(`[ProcessManager] Could not find ${command} using system command, trying common paths`);
+    }
+    const commonPaths = [];
+    if (isWindows) {
+      const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
+      const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+      const appData = process.env["APPDATA"] || path2.join(os.homedir(), "AppData", "Roaming");
+      const localAppData = process.env["LOCALAPPDATA"] || path2.join(os.homedir(), "AppData", "Local");
+      commonPaths.push(
+        path2.join(programFiles, "nodejs", `${command}.cmd`),
+        path2.join(programFilesX86, "nodejs", `${command}.cmd`),
+        path2.join(appData, "npm", `${command}.cmd`),
+        path2.join(localAppData, "npm", `${command}.cmd`),
+        path2.join(os.homedir(), "AppData", "Roaming", "npm", `${command}.cmd`)
+      );
+      const nvmPath = process.env["NVM_HOME"];
+      if (nvmPath) {
+        commonPaths.push(path2.join(nvmPath, `${command}.cmd`));
+      }
+      const voltaHome = process.env["VOLTA_HOME"] || path2.join(os.homedir(), ".volta");
+      commonPaths.push(path2.join(voltaHome, "bin", `${command}.cmd`));
+    } else {
+      const homeDir = process.env.HOME || os.homedir();
+      commonPaths.push(
+        `/usr/local/bin/${command}`,
+        `/opt/homebrew/bin/${command}`,
+        `/usr/bin/${command}`,
+        `${homeDir}/.volta/bin/${command}`
+      );
+      if (homeDir) {
+        try {
+          const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
+          if (fs2.existsSync(nvmDir)) {
+            const versions = fs2.readdirSync(nvmDir);
+            for (const version of versions) {
+              const binPath = path2.join(nvmDir, version, "bin", command);
+              commonPaths.push(binPath);
+            }
           }
+        } catch (error) {
+          console.warn("[ProcessManager] Failed to scan NVM paths:", error);
         }
-      } catch (error) {
-        console.warn("[ProcessManager] Failed to scan FNM paths:", error);
+        try {
+          const fnmDir = path2.join(homeDir, ".fnm", "node-versions");
+          if (fs2.existsSync(fnmDir)) {
+            const versions = fs2.readdirSync(fnmDir);
+            for (const version of versions) {
+              const binPath = path2.join(fnmDir, version, "installation", "bin", command);
+              commonPaths.push(binPath);
+            }
+          }
+        } catch (error) {
+          console.warn("[ProcessManager] Failed to scan FNM paths:", error);
+        }
       }
     }
     for (const cmdPath of commonPaths) {
@@ -432,7 +458,7 @@ class ProcessManager {
       }
     }
     console.warn(`[ProcessManager] Could not find full path for ${command}, using original command`);
-    return command;
+    return isWindows ? commandWithExt : command;
   }
   setupLogListeners(projectId, childProcess) {
     var _a, _b;
@@ -521,48 +547,71 @@ class ProcessManager {
   }
   getEnhancedPath() {
     const currentPath = process.env.PATH || "";
-    const additionalPaths = [
-      "/usr/local/bin",
-      "/opt/homebrew/bin",
-      "/usr/bin",
-      "/bin"
-    ];
-    const homeDir = process.env.HOME || "";
-    if (homeDir) {
-      const fs22 = require("fs");
-      const path2 = require("path");
-      try {
-        const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
-        if (fs22.existsSync(nvmDir)) {
-          const versions = fs22.readdirSync(nvmDir);
-          for (const version of versions) {
-            const binPath = path2.join(nvmDir, version, "bin");
-            if (fs22.existsSync(binPath)) {
-              additionalPaths.push(binPath);
-            }
-          }
-        }
-      } catch (error) {
-        console.warn("[ProcessManager] Failed to resolve NVM paths:", error);
+    const fs2 = require("fs");
+    const path2 = require("path");
+    const os = require("os");
+    const isWindows = process.platform === "win32";
+    const pathSeparator = isWindows ? ";" : ":";
+    const additionalPaths = [];
+    if (isWindows) {
+      const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
+      const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+      const appData = process.env["APPDATA"] || path2.join(os.homedir(), "AppData", "Roaming");
+      const localAppData = process.env["LOCALAPPDATA"] || path2.join(os.homedir(), "AppData", "Local");
+      additionalPaths.push(
+        path2.join(programFiles, "nodejs"),
+        path2.join(programFilesX86, "nodejs"),
+        path2.join(appData, "npm"),
+        path2.join(localAppData, "npm"),
+        path2.join(os.homedir(), "AppData", "Roaming", "npm")
+      );
+      const nvmPath = process.env["NVM_HOME"];
+      if (nvmPath) {
+        additionalPaths.push(nvmPath);
       }
-      additionalPaths.push(`${homeDir}/.volta/bin`);
-      try {
-        const fnmDir = path2.join(homeDir, ".fnm", "node-versions");
-        if (fs22.existsSync(fnmDir)) {
-          const versions = fs22.readdirSync(fnmDir);
-          for (const version of versions) {
-            const binPath = path2.join(fnmDir, version, "installation", "bin");
-            if (fs22.existsSync(binPath)) {
-              additionalPaths.push(binPath);
+      const voltaHome = process.env["VOLTA_HOME"] || path2.join(os.homedir(), ".volta");
+      additionalPaths.push(path2.join(voltaHome, "bin"));
+    } else {
+      additionalPaths.push(
+        "/usr/local/bin",
+        "/opt/homebrew/bin",
+        "/usr/bin",
+        "/bin"
+      );
+      const homeDir = process.env.HOME || os.homedir();
+      if (homeDir) {
+        try {
+          const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
+          if (fs2.existsSync(nvmDir)) {
+            const versions = fs2.readdirSync(nvmDir);
+            for (const version of versions) {
+              const binPath = path2.join(nvmDir, version, "bin");
+              if (fs2.existsSync(binPath)) {
+                additionalPaths.push(binPath);
+              }
             }
           }
+        } catch (error) {
+          console.warn("[ProcessManager] Failed to resolve NVM paths:", error);
         }
-      } catch (error) {
-        console.warn("[ProcessManager] Failed to resolve FNM paths:", error);
+        additionalPaths.push(`${homeDir}/.volta/bin`);
+        try {
+          const fnmDir = path2.join(homeDir, ".fnm", "node-versions");
+          if (fs2.existsSync(fnmDir)) {
+            const versions = fs2.readdirSync(fnmDir);
+            for (const version of versions) {
+              const binPath = path2.join(fnmDir, version, "installation", "bin");
+              if (fs2.existsSync(binPath)) {
+                additionalPaths.push(binPath);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn("[ProcessManager] Failed to resolve FNM paths:", error);
+        }
       }
     }
-    const fs2 = require("fs");
-    const uniquePaths = [.../* @__PURE__ */ new Set([currentPath, ...additionalPaths])].filter((pathStr) => {
+    const uniquePaths = [.../* @__PURE__ */ new Set([...currentPath.split(pathSeparator), ...additionalPaths])].filter((pathStr) => {
       if (!pathStr)
         return false;
       try {
@@ -571,7 +620,7 @@ class ProcessManager {
         return false;
       }
     });
-    const enhancedPath = uniquePaths.join(":");
+    const enhancedPath = uniquePaths.join(pathSeparator);
     console.log(`[ProcessManager] Enhanced PATH: ${enhancedPath}`);
     return enhancedPath;
   }
