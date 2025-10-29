@@ -1,24 +1,24 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
-import { join } from 'path';
-import { ProjectManager } from './services/ProjectManager';
-import { ConfigManager } from './services/ConfigManager';
-import { LogManager } from './services/LogManager';
-import { ProcessManager } from './services/ProcessManager';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { join } from 'path'
+import { ProjectManager } from './services/ProjectManager'
+import { ProcessManager } from './services/ProcessManager'
+import { LogManager } from './services/LogManager'
+import { ConfigManager } from './services/ConfigManager'
 
 // 服务实例
-let projectManager: ProjectManager;
-let processManager: ProcessManager;
-let logManager: LogManager;
-let configManager: ConfigManager;
+let projectManager: ProjectManager
+let processManager: ProcessManager
+let logManager: LogManager
+let configManager: ConfigManager
 
 // 主窗口
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = process.env.NODE_ENV === 'development'
 
-function createWindow(): void {
+function createWindow() {
   // 获取窗口配置
-  const config = configManager ? configManager.getConfig() : null;
+  const config = configManager ? configManager.getConfig() : null
   
   mainWindow = new BrowserWindow({
     width: config?.windowBounds?.width || 1200,
@@ -28,20 +28,20 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      preload: join(__dirname, 'preload.js')
     },
     titleBarStyle: 'hiddenInset',
     show: false
-  });
+  })
 
   // 加载应用
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    mainWindow.loadURL('http://localhost:5173')
+    mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
 
   // 窗口准备好后显示
