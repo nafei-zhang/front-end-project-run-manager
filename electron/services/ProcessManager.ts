@@ -316,7 +316,8 @@ export class ProcessManager {
         // Windows的where命令可能返回多行，取第一行
         const firstPath = fullPath.split('\n')[0].trim()
         console.log(`[ProcessManager] Found ${command} at: ${firstPath}`)
-        return firstPath
+        // 如果路径包含空格，用引号包围
+        return firstPath.includes(' ') ? `"${firstPath}"` : firstPath
       }
     } catch (error) {
       console.warn(`[ProcessManager] Could not find ${command} using system command, trying common paths`)
@@ -396,7 +397,8 @@ export class ProcessManager {
       try {
         if (fs.existsSync(cmdPath)) {
           console.log(`[ProcessManager] Found ${command} at: ${cmdPath}`)
-          return cmdPath
+          // 如果路径包含空格，用引号包围
+          return cmdPath.includes(' ') ? `"${cmdPath}"` : cmdPath
         }
       } catch (error) {
         continue

@@ -65,14 +65,33 @@
       "node_modules/**/*"
     ],
     "compression": "store",
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
     "mac": {
       "category": "public.app-category.developer-tools"
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "sign": null,
+      "certificateFile": null,
+      "certificatePassword": null,
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false,
+      "signDlls": false
     },
     "linux": {
       "target": "AppImage"
-    }
+    },
+    "forceCodeSigning": false,
+    "buildDependenciesFromSource": false,
+    "afterSign": null,
+    "beforeBuild": null
   }
 }

@@ -152,6 +152,228 @@ class ProjectManager {
     return fs.existsSync(path.join(projectPath, "package.json"));
   }
 }
+const DEFAULT_CONFIG = {
+  theme: "system",
+  autoStart: false,
+  minimizeToTray: true,
+  showNotifications: true,
+  defaultPackageManager: "npm",
+  maxConcurrentProjects: 5,
+  language: "en-US",
+  logLevel: "info"
+};
+class ConfigManager {
+  constructor() {
+    __publicField(this, "configFilePath");
+    __publicField(this, "config");
+    this.configFilePath = path.join(electron.app.getPath("userData"), "app-config.json");
+    this.config = this.loadConfig();
+  }
+  loadConfig() {
+    try {
+      if (fs.existsSync(this.configFilePath)) {
+        const data = fs.readFileSync(this.configFilePath, "utf-8");
+        const savedConfig = JSON.parse(data);
+        return { ...DEFAULT_CONFIG, ...savedConfig };
+      } else {
+        this.saveConfig(DEFAULT_CONFIG);
+        return { ...DEFAULT_CONFIG };
+      }
+    } catch (error) {
+      console.error("Failed to load config:", error);
+      return { ...DEFAULT_CONFIG };
+    }
+  }
+  saveConfig(config) {
+    try {
+      fs.writeFileSync(this.configFilePath, JSON.stringify(config, null, 2));
+    } catch (error) {
+      console.error("Failed to save config:", error);
+    }
+  }
+  getConfig() {
+    return { ...this.config };
+  }
+  updateConfig(updates) {
+    this.config = { ...this.config, ...updates };
+    this.saveConfig(this.config);
+    return { ...this.config };
+  }
+  resetConfig() {
+    this.config = { ...DEFAULT_CONFIG };
+    this.saveConfig(this.config);
+    return { ...this.config };
+  }
+  // 获取特定配置项
+  getTheme() {
+    return this.config.theme;
+  }
+  getDefaultPackageManager() {
+    return this.config.defaultPackageManager;
+  }
+  getMaxConcurrentProjects() {
+    return this.config.maxConcurrentProjects;
+  }
+  getLanguage() {
+    return this.config.language;
+  }
+  // 设置特定配置项
+  setTheme(theme) {
+    this.updateConfig({ theme });
+  }
+  setDefaultPackageManager(packageManager) {
+    this.updateConfig({ defaultPackageManager: packageManager });
+  }
+  setWindowBounds(bounds) {
+    this.updateConfig({ windowBounds: bounds });
+  }
+  setLanguage(language) {
+    this.updateConfig({ language });
+  }
+  // 验证配置
+  validateConfig(config) {
+    const errors = [];
+    if (config.theme && !["light", "dark", "system"].includes(config.theme)) {
+      errors.push("Invalid theme value");
+    }
+    if (config.defaultPackageManager && !["npm", "pnpm", "yarn"].includes(config.defaultPackageManager)) {
+      errors.push("Invalid package manager");
+    }
+    if (config.maxConcurrentProjects && (config.maxConcurrentProjects < 1 || config.maxConcurrentProjects > 20)) {
+      errors.push("Max concurrent projects must be between 1 and 20");
+    }
+    if (config.language && !["zh-CN", "en-US"].includes(config.language)) {
+      errors.push("Invalid language");
+    }
+    if (config.logLevel && !["info", "warn", "error"].includes(config.logLevel)) {
+      errors.push("Invalid log level");
+    }
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+  // 导出配置
+  exportConfig() {
+    return JSON.stringify(this.config, null, 2);
+  }
+  // 导入配置
+  importConfig(configJson) {
+    try {
+      const importedConfig = JSON.parse(configJson);
+      const validation = this.validateConfig(importedConfig);
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: `Invalid configuration: ${validation.errors.join(", ")}`
+        };
+      }
+      this.config = { ...DEFAULT_CONFIG, ...importedConfig };
+      this.saveConfig(this.config);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Invalid JSON format"
+      };
+    }
+  }
+}
+class LogManager {
+  constructor() {
+    __publicField(this, "logs", /* @__PURE__ */ new Map());
+    __publicField(this, "maxLogsPerProject", 500);
+    __publicField(this, "mainWindow");
+  }
+  setMainWindow(window) {
+    this.mainWindow = window;
+  }
+  addLog(projectId, logEntry) {
+    if (!this.logs.has(projectId)) {
+      this.logs.set(projectId, []);
+    }
+    const projectLogs = this.logs.get(projectId);
+    projectLogs.push(logEntry);
+    if (projectLogs.length > this.maxLogsPerProject) {
+      projectLogs.shift();
+    }
+    this.sendLogToRenderer(projectId, logEntry);
+  }
+  getMemoryLogs(projectId) {
+    return this.logs.get(projectId) || [];
+  }
+  getAllMemoryLogs() {
+    const result = {};
+    for (const [projectId, logs] of this.logs) {
+      result[projectId] = [...logs];
+    }
+    return result;
+  }
+  clearProjectLogs(projectId) {
+    this.logs.delete(projectId);
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("logs:cleared", projectId);
+    }
+  }
+  clearAllLogs() {
+    this.logs.clear();
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("logs:allCleared");
+    }
+  }
+  getLogStats(projectId) {
+    const logs = this.logs.get(projectId) || [];
+    return {
+      total: logs.length,
+      errors: logs.filter((log) => log.level === "error").length,
+      warnings: logs.filter((log) => log.level === "warn").length
+    };
+  }
+  // 获取最近的错误日志
+  getRecentErrors(projectId, limit = 10) {
+    const logs = this.logs.get(projectId) || [];
+    return logs.filter((log) => log.level === "error").slice(-limit);
+  }
+  // 搜索日志
+  searchLogs(projectId, query, level) {
+    const logs = this.logs.get(projectId) || [];
+    const lowerQuery = query.toLowerCase();
+    return logs.filter((log) => {
+      const matchesQuery = log.message.toLowerCase().includes(lowerQuery);
+      const matchesLevel = !level || log.level === level;
+      return matchesQuery && matchesLevel;
+    });
+  }
+  sendLogToRenderer(projectId, logEntry) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("logs:newEntry", {
+        projectId,
+        logEntry
+      });
+    }
+  }
+  // 获取内存使用情况
+  getMemoryUsage() {
+    let totalLogs = 0;
+    let estimatedMemoryBytes = 0;
+    for (const [projectId, logs] of this.logs) {
+      totalLogs += logs.length;
+      for (const log of logs) {
+        estimatedMemoryBytes += JSON.stringify(log).length * 2;
+      }
+      estimatedMemoryBytes += projectId.length * 2;
+    }
+    return {
+      totalProjects: this.logs.size,
+      totalLogs,
+      estimatedMemoryKB: Math.round(estimatedMemoryBytes / 1024)
+    };
+  }
+  // 清理过期项目的日志（当项目被删除时调用）
+  cleanupProjectLogs(projectId) {
+    this.logs.delete(projectId);
+  }
+}
 class ProcessManager {
   constructor(logManager2) {
     __publicField(this, "runningProcesses", /* @__PURE__ */ new Map());
@@ -388,7 +610,7 @@ class ProcessManager {
       if (fullPath) {
         const firstPath = fullPath.split("\n")[0].trim();
         console.log(`[ProcessManager] Found ${command} at: ${firstPath}`);
-        return firstPath;
+        return firstPath.includes(" ") ? `"${firstPath}"` : firstPath;
       }
     } catch (error) {
       console.warn(`[ProcessManager] Could not find ${command} using system command, trying common paths`);
@@ -451,7 +673,7 @@ class ProcessManager {
       try {
         if (fs2.existsSync(cmdPath)) {
           console.log(`[ProcessManager] Found ${command} at: ${cmdPath}`);
-          return cmdPath;
+          return cmdPath.includes(" ") ? `"${cmdPath}"` : cmdPath;
         }
       } catch (error) {
         continue;
@@ -625,228 +847,6 @@ class ProcessManager {
     return enhancedPath;
   }
 }
-class LogManager {
-  constructor() {
-    __publicField(this, "logs", /* @__PURE__ */ new Map());
-    __publicField(this, "maxLogsPerProject", 500);
-    __publicField(this, "mainWindow");
-  }
-  setMainWindow(window) {
-    this.mainWindow = window;
-  }
-  addLog(projectId, logEntry) {
-    if (!this.logs.has(projectId)) {
-      this.logs.set(projectId, []);
-    }
-    const projectLogs = this.logs.get(projectId);
-    projectLogs.push(logEntry);
-    if (projectLogs.length > this.maxLogsPerProject) {
-      projectLogs.shift();
-    }
-    this.sendLogToRenderer(projectId, logEntry);
-  }
-  getMemoryLogs(projectId) {
-    return this.logs.get(projectId) || [];
-  }
-  getAllMemoryLogs() {
-    const result = {};
-    for (const [projectId, logs] of this.logs) {
-      result[projectId] = [...logs];
-    }
-    return result;
-  }
-  clearProjectLogs(projectId) {
-    this.logs.delete(projectId);
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("logs:cleared", projectId);
-    }
-  }
-  clearAllLogs() {
-    this.logs.clear();
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("logs:allCleared");
-    }
-  }
-  getLogStats(projectId) {
-    const logs = this.logs.get(projectId) || [];
-    return {
-      total: logs.length,
-      errors: logs.filter((log) => log.level === "error").length,
-      warnings: logs.filter((log) => log.level === "warn").length
-    };
-  }
-  // 获取最近的错误日志
-  getRecentErrors(projectId, limit = 10) {
-    const logs = this.logs.get(projectId) || [];
-    return logs.filter((log) => log.level === "error").slice(-limit);
-  }
-  // 搜索日志
-  searchLogs(projectId, query, level) {
-    const logs = this.logs.get(projectId) || [];
-    const lowerQuery = query.toLowerCase();
-    return logs.filter((log) => {
-      const matchesQuery = log.message.toLowerCase().includes(lowerQuery);
-      const matchesLevel = !level || log.level === level;
-      return matchesQuery && matchesLevel;
-    });
-  }
-  sendLogToRenderer(projectId, logEntry) {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("logs:newEntry", {
-        projectId,
-        logEntry
-      });
-    }
-  }
-  // 获取内存使用情况
-  getMemoryUsage() {
-    let totalLogs = 0;
-    let estimatedMemoryBytes = 0;
-    for (const [projectId, logs] of this.logs) {
-      totalLogs += logs.length;
-      for (const log of logs) {
-        estimatedMemoryBytes += JSON.stringify(log).length * 2;
-      }
-      estimatedMemoryBytes += projectId.length * 2;
-    }
-    return {
-      totalProjects: this.logs.size,
-      totalLogs,
-      estimatedMemoryKB: Math.round(estimatedMemoryBytes / 1024)
-    };
-  }
-  // 清理过期项目的日志（当项目被删除时调用）
-  cleanupProjectLogs(projectId) {
-    this.logs.delete(projectId);
-  }
-}
-const DEFAULT_CONFIG = {
-  theme: "system",
-  autoStart: false,
-  minimizeToTray: true,
-  showNotifications: true,
-  defaultPackageManager: "npm",
-  maxConcurrentProjects: 5,
-  language: "en-US",
-  logLevel: "info"
-};
-class ConfigManager {
-  constructor() {
-    __publicField(this, "configFilePath");
-    __publicField(this, "config");
-    this.configFilePath = path.join(electron.app.getPath("userData"), "app-config.json");
-    this.config = this.loadConfig();
-  }
-  loadConfig() {
-    try {
-      if (fs.existsSync(this.configFilePath)) {
-        const data = fs.readFileSync(this.configFilePath, "utf-8");
-        const savedConfig = JSON.parse(data);
-        return { ...DEFAULT_CONFIG, ...savedConfig };
-      } else {
-        this.saveConfig(DEFAULT_CONFIG);
-        return { ...DEFAULT_CONFIG };
-      }
-    } catch (error) {
-      console.error("Failed to load config:", error);
-      return { ...DEFAULT_CONFIG };
-    }
-  }
-  saveConfig(config) {
-    try {
-      fs.writeFileSync(this.configFilePath, JSON.stringify(config, null, 2));
-    } catch (error) {
-      console.error("Failed to save config:", error);
-    }
-  }
-  getConfig() {
-    return { ...this.config };
-  }
-  updateConfig(updates) {
-    this.config = { ...this.config, ...updates };
-    this.saveConfig(this.config);
-    return { ...this.config };
-  }
-  resetConfig() {
-    this.config = { ...DEFAULT_CONFIG };
-    this.saveConfig(this.config);
-    return { ...this.config };
-  }
-  // 获取特定配置项
-  getTheme() {
-    return this.config.theme;
-  }
-  getDefaultPackageManager() {
-    return this.config.defaultPackageManager;
-  }
-  getMaxConcurrentProjects() {
-    return this.config.maxConcurrentProjects;
-  }
-  getLanguage() {
-    return this.config.language;
-  }
-  // 设置特定配置项
-  setTheme(theme) {
-    this.updateConfig({ theme });
-  }
-  setDefaultPackageManager(packageManager) {
-    this.updateConfig({ defaultPackageManager: packageManager });
-  }
-  setWindowBounds(bounds) {
-    this.updateConfig({ windowBounds: bounds });
-  }
-  setLanguage(language) {
-    this.updateConfig({ language });
-  }
-  // 验证配置
-  validateConfig(config) {
-    const errors = [];
-    if (config.theme && !["light", "dark", "system"].includes(config.theme)) {
-      errors.push("Invalid theme value");
-    }
-    if (config.defaultPackageManager && !["npm", "pnpm", "yarn"].includes(config.defaultPackageManager)) {
-      errors.push("Invalid package manager");
-    }
-    if (config.maxConcurrentProjects && (config.maxConcurrentProjects < 1 || config.maxConcurrentProjects > 20)) {
-      errors.push("Max concurrent projects must be between 1 and 20");
-    }
-    if (config.language && !["zh-CN", "en-US"].includes(config.language)) {
-      errors.push("Invalid language");
-    }
-    if (config.logLevel && !["info", "warn", "error"].includes(config.logLevel)) {
-      errors.push("Invalid log level");
-    }
-    return {
-      valid: errors.length === 0,
-      errors
-    };
-  }
-  // 导出配置
-  exportConfig() {
-    return JSON.stringify(this.config, null, 2);
-  }
-  // 导入配置
-  importConfig(configJson) {
-    try {
-      const importedConfig = JSON.parse(configJson);
-      const validation = this.validateConfig(importedConfig);
-      if (!validation.valid) {
-        return {
-          success: false,
-          error: `Invalid configuration: ${validation.errors.join(", ")}`
-        };
-      }
-      this.config = { ...DEFAULT_CONFIG, ...importedConfig };
-      this.saveConfig(this.config);
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Invalid JSON format"
-      };
-    }
-  }
-}
 let projectManager;
 let processManager;
 let logManager;
@@ -864,9 +864,9 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, "preload.js")
+      contextIsolation: true
     },
     titleBarStyle: "hiddenInset",
     show: false
