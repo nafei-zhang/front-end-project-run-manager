@@ -80,31 +80,38 @@ export class ProjectManager {
     console.log('[ProjectManager] createProject called with data:', projectData)
     const now = new Date().toISOString()
     
-    // 检测默认启动命令
-    let startCommand = projectData.startCommand || 'dev'
+    // 优先使用用户提供的启动命令
+    let startCommand = projectData.startCommand
     
-    // 尝试读取 package.json 来检测可用的脚本
-    try {
-      const packageJsonPath = join(projectData.path, 'package.json')
-      console.log('[ProjectManager] Checking package.json at:', packageJsonPath)
-      if (existsSync(packageJsonPath)) {
-        const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
-        const scripts = packageJson.scripts || {}
-        console.log('[ProjectManager] Found scripts:', scripts)
-        
-        // 优先级：dev > start > serve
-        if (scripts.dev) {
-          startCommand = 'dev'
-        } else if (scripts.start) {
-          startCommand = 'start'
-        } else if (scripts.serve) {
-          startCommand = 'serve'
+    // 只有当用户未提供启动命令时，才尝试自动检测
+    if (!startCommand) {
+      startCommand = 'dev' // 默认值
+      
+      // 尝试读取 package.json 来检测可用的脚本
+      try {
+        const packageJsonPath = join(projectData.path, 'package.json')
+        console.log('[ProjectManager] Checking package.json at:', packageJsonPath)
+        if (existsSync(packageJsonPath)) {
+          const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+          const scripts = packageJson.scripts || {}
+          console.log('[ProjectManager] Found scripts:', scripts)
+          
+          // 优先级：dev > start > serve
+          if (scripts.dev) {
+            startCommand = 'dev'
+          } else if (scripts.start) {
+            startCommand = 'start'
+          } else if (scripts.serve) {
+            startCommand = 'serve'
+          }
+        } else {
+          console.log('[ProjectManager] package.json not found at path')
         }
-      } else {
-        console.log('[ProjectManager] package.json not found at path')
+      } catch (error) {
+        console.warn('[ProjectManager] Failed to read package.json:', error)
       }
-    } catch (error) {
-      console.warn('[ProjectManager] Failed to read package.json:', error)
+    } else {
+      console.log('[ProjectManager] Using user-provided startCommand:', startCommand)
     }
 
     const project: Project = {

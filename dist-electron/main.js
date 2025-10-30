@@ -54,26 +54,31 @@ class ProjectManager {
   createProject(projectData) {
     console.log("[ProjectManager] createProject called with data:", projectData);
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    let startCommand = projectData.startCommand || "dev";
-    try {
-      const packageJsonPath = path.join(projectData.path, "package.json");
-      console.log("[ProjectManager] Checking package.json at:", packageJsonPath);
-      if (fs.existsSync(packageJsonPath)) {
-        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-        const scripts = packageJson.scripts || {};
-        console.log("[ProjectManager] Found scripts:", scripts);
-        if (scripts.dev) {
-          startCommand = "dev";
-        } else if (scripts.start) {
-          startCommand = "start";
-        } else if (scripts.serve) {
-          startCommand = "serve";
+    let startCommand = projectData.startCommand;
+    if (!startCommand) {
+      startCommand = "dev";
+      try {
+        const packageJsonPath = path.join(projectData.path, "package.json");
+        console.log("[ProjectManager] Checking package.json at:", packageJsonPath);
+        if (fs.existsSync(packageJsonPath)) {
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+          const scripts = packageJson.scripts || {};
+          console.log("[ProjectManager] Found scripts:", scripts);
+          if (scripts.dev) {
+            startCommand = "dev";
+          } else if (scripts.start) {
+            startCommand = "start";
+          } else if (scripts.serve) {
+            startCommand = "serve";
+          }
+        } else {
+          console.log("[ProjectManager] package.json not found at path");
         }
-      } else {
-        console.log("[ProjectManager] package.json not found at path");
+      } catch (error) {
+        console.warn("[ProjectManager] Failed to read package.json:", error);
       }
-    } catch (error) {
-      console.warn("[ProjectManager] Failed to read package.json:", error);
+    } else {
+      console.log("[ProjectManager] Using user-provided startCommand:", startCommand);
     }
     const project = {
       id: crypto.randomUUID(),
