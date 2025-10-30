@@ -28,7 +28,8 @@ const Dashboard: React.FC = () => {
     loadProjects, 
     startProject, 
     stopProject,
-    refreshAllProjects 
+    refreshAllProjects,
+    toggleAutoRefreshLogs
   } = useProjectStore()
   
   const { setActiveProject } = useLogStore()
@@ -86,6 +87,22 @@ const Dashboard: React.FC = () => {
   const handleViewLogs = (projectId: string) => {
     setActiveProject(projectId)
     navigate('/logs')
+  }
+
+  const handleToggleAutoRefreshLogs = async (projectId: string) => {
+    try {
+      await toggleAutoRefreshLogs(projectId)
+      const project = projects.find(p => p.id === projectId)
+      const newState = !project?.autoRefreshLogs
+      showToast(
+        'success', 
+        t('projects.autoRefreshToggled'),
+        newState ? t('projects.autoRefreshEnabled') : t('projects.autoRefreshDisabled')
+      )
+    } catch (error) {
+      console.error('Error toggling auto refresh logs:', error)
+      showToast('error', t('projects.autoRefreshError'), t('projects.autoRefreshErrorDesc'))
+    }
   }
 
   const getStatusIcon = (status: string) => {
@@ -272,6 +289,23 @@ const Dashboard: React.FC = () => {
                           PID: {project.pid}
                         </span>
                       )}
+                    </div>
+                    
+                    {/* 自动刷新日志复选框 */}
+                    <div className="flex items-center space-x-2 mt-3">
+                      <input
+                        type="checkbox"
+                        id={`auto-refresh-${project.id}`}
+                        checked={project.autoRefreshLogs || false}
+                        onChange={() => handleToggleAutoRefreshLogs(project.id)}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <label 
+                        htmlFor={`auto-refresh-${project.id}`}
+                        className="text-sm text-muted-foreground cursor-pointer"
+                      >
+                        {t('projects.autoRefreshLogs')}
+                      </label>
                     </div>
                   </div>
                   

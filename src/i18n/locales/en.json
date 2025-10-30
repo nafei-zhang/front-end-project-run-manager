@@ -95,7 +95,13 @@
     "confirm": "Confirm",
     "cancel": "Cancel",
     "deleteConfirmMessage": "Click delete button again to confirm project deletion",
-    "logs": "Logs"
+    "logs": "Logs",
+    "autoRefreshLogs": "Auto-refresh logs",
+    "autoRefreshToggled": "Auto-refresh setting updated",
+    "autoRefreshEnabled": "Auto-refresh logs enabled",
+    "autoRefreshDisabled": "Auto-refresh logs disabled",
+    "autoRefreshError": "Failed to update auto-refresh setting",
+    "autoRefreshErrorDesc": "Unable to update auto-refresh setting, please try again"
   },
   "projectForm": {
     "title": "Add Project",

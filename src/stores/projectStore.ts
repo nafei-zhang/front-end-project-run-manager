@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useLogStore } from './logStore'
 
 interface Project {
   id: string
@@ -10,6 +11,7 @@ interface Project {
   pid?: number
   url?: string  // 添加 URL 字段
   packageManager?: 'npm' | 'pnpm' | 'yarn'  // 添加包管理器字段
+  autoRefreshLogs?: boolean  // 添加自动刷新日志字段
   createdAt: string
   updatedAt: string
 }
@@ -35,6 +37,7 @@ interface ProjectStore {
   stopProject: (id: string) => Promise<boolean>
   refreshProjectStatus: (id: string) => Promise<void>
   refreshAllProjects: () => Promise<void>
+  toggleAutoRefreshLogs: (id: string) => Promise<void>
 }
 
 // 检测是否在Electron环境中
@@ -209,6 +212,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   startProject: async (id: string) => {
     console.log('[ProjectStore] startProject called for id:', id)
+    
+    // 在启动项目之前清理该项目的日志
+    try {
+      const logStore = useLogStore.getState()
+      logStore.clearProjectLogs(id)
+      console.log('[ProjectStore] Cleared logs for project:', id)
+    } catch (error) {
+      console.warn('[ProjectStore] Failed to clear logs before starting project:', error)
+      // 即使清理日志失败，也继续启动项目
+    }
+    
     try {
       if (isElectron()) {
         console.log('[ProjectStore] Calling electronAPI.projects.start')
@@ -372,6 +386,45 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       console.error('[ProjectStore] Error refreshing all projects:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to refresh projects'
       set({ error: errorMessage, loading: false })
+    }
+  },
+
+  toggleAutoRefreshLogs: async (id: string) => {
+    console.log('[ProjectStore] toggleAutoRefreshLogs called for project:', id)
+    try {
+      const { projects } = get()
+      const project = projects.find(p => p.id === id)
+      
+      if (!project) {
+        console.error('[ProjectStore] Project not found:', id)
+        return
+      }
+
+      const newAutoRefreshState = !project.autoRefreshLogs
+      console.log('[ProjectStore] Toggling autoRefreshLogs from', project.autoRefreshLogs, 'to', newAutoRefreshState)
+
+      if (isElectron()) {
+        // 在Electron环境中，通过API更新项目
+        const updatedProject = await window.electronAPI.projects.update(id, { 
+          autoRefreshLogs: newAutoRefreshState 
+        })
+        if (updatedProject) {
+          const updatedProjects = projects.map(p => 
+            p.id === id ? updatedProject : p
+          )
+          set({ projects: updatedProjects })
+        }
+      } else {
+        // 在浏览器环境中，直接更新本地状态
+        const updatedProjects = projects.map(p => 
+          p.id === id ? { ...p, autoRefreshLogs: newAutoRefreshState, updatedAt: new Date().toISOString() } : p
+        )
+        set({ projects: updatedProjects })
+      }
+    } catch (error) {
+      console.error('[ProjectStore] Error toggling auto refresh logs:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to toggle auto refresh logs'
+      set({ error: errorMessage })
     }
   }
 }))

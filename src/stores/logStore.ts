@@ -9,6 +9,7 @@ interface LogEntry {
 interface LogStore {
   logs: Record<string, LogEntry[]>
   activeProjectId: string | null
+  autoRefreshInterval: NodeJS.Timeout | null
   filter: {
     level: 'all' | 'info' | 'warn' | 'error'
     search: string
@@ -23,11 +24,14 @@ interface LogStore {
   refreshLogs: (projectId: string) => Promise<void>
   setFilter: (filter: Partial<LogStore['filter']>) => void
   getFilteredLogs: (projectId: string) => LogEntry[]
+  startAutoRefresh: (projectId: string) => void
+  stopAutoRefresh: () => void
 }
 
 export const useLogStore = create<LogStore>((set, get) => ({
   logs: {},
   activeProjectId: null,
+  autoRefreshInterval: null,
   filter: {
     level: 'all',
     search: ''
@@ -144,6 +148,31 @@ export const useLogStore = create<LogStore>((set, get) => ({
       
       return true
     })
+  },
+
+  startAutoRefresh: (projectId) => {
+    const { autoRefreshInterval, stopAutoRefresh } = get()
+    
+    // 如果已经有定时器在运行，先停止它
+    if (autoRefreshInterval) {
+      stopAutoRefresh()
+    }
+    
+    // 创建新的定时器，每0.5秒刷新一次日志
+    const interval = setInterval(() => {
+      get().refreshLogs(projectId)
+    }, 500)
+    
+    set({ autoRefreshInterval: interval })
+  },
+
+  stopAutoRefresh: () => {
+    const { autoRefreshInterval } = get()
+    
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval)
+      set({ autoRefreshInterval: null })
+    }
   }
 }))
 

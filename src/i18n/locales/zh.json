@@ -94,7 +94,13 @@
     "commonCommands": "常用命令: npm run dev, pnpm start, yarn build, npm run serve",
     "confirm": "确定",
     "deleteConfirmMessage": "再次点击删除按钮确认删除项目",
-    "logs": "日志"
+    "logs": "日志",
+    "autoRefreshLogs": "自动刷新日志",
+    "autoRefreshToggled": "自动刷新设置已更新",
+    "autoRefreshEnabled": "已启用自动刷新日志",
+    "autoRefreshDisabled": "已禁用自动刷新日志",
+    "autoRefreshError": "更新自动刷新设置失败",
+    "autoRefreshErrorDesc": "无法更新自动刷新设置，请稍后重试"
   },
   "projectForm": {
     "title": "添加项目",

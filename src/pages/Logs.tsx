@@ -25,7 +25,9 @@ const Logs: React.FC = () => {
     clearProjectLogs, 
     setFilter, 
     getFilteredLogs,
-    refreshLogs
+    refreshLogs,
+    startAutoRefresh,
+    stopAutoRefresh
   } = useLogStore()
 
   const [searchInput, setSearchInput] = useState(filter.search)
@@ -38,8 +40,33 @@ const Logs: React.FC = () => {
     }
   }, [activeProjectId, projects, setActiveProject])
 
+  // 监听当前项目的autoRefreshLogs设置变化
+  useEffect(() => {
+    if (activeProjectId) {
+      const project = projects.find(p => p.id === activeProjectId)
+      if (project?.autoRefreshLogs) {
+        startAutoRefresh(activeProjectId)
+      } else {
+        stopAutoRefresh()
+      }
+    }
+    
+    // 组件卸载时清理定时器
+    return () => {
+      stopAutoRefresh()
+    }
+  }, [activeProjectId, projects, startAutoRefresh, stopAutoRefresh])
+
   const handleProjectChange = (projectId: string) => {
     setActiveProject(projectId)
+    
+    // 根据项目的autoRefreshLogs设置来启动或停止自动刷新
+    const project = projects.find(p => p.id === projectId)
+    if (project?.autoRefreshLogs) {
+      startAutoRefresh(projectId)
+    } else {
+      stopAutoRefresh()
+    }
   }
 
   const handleSearchChange = (value: string) => {

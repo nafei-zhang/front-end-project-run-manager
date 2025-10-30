@@ -54,6 +54,7 @@ export interface Project {
   url?: string
   createdAt: string
   updatedAt: string
+  autoRefreshLogs?: boolean // 添加自动刷新日志字段
 }
 
 export interface CreateProjectData {

@@ -13,6 +13,7 @@ export interface Project {
   port?: number
   pid?: number
   url?: string  // 添加 URL 字段
+  autoRefreshLogs?: boolean  // 添加自动刷新日志字段
   createdAt: string
   updatedAt: string
 }

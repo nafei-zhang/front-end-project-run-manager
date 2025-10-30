@@ -30,7 +30,8 @@ const Projects: React.FC = () => {
     startProject, 
     stopProject,
     deleteProject,
-    refreshAllProjects 
+    refreshAllProjects,
+    toggleAutoRefreshLogs
   } = useProjectStore()
 
   const [showForm, setShowForm] = useState(false)
@@ -124,6 +125,22 @@ const Projects: React.FC = () => {
 
   const cancelStopProject = () => {
     setStopConfirm(null)
+  }
+
+  const handleToggleAutoRefreshLogs = async (projectId: string) => {
+    try {
+      await toggleAutoRefreshLogs(projectId)
+      const project = projects.find(p => p.id === projectId)
+      const newState = !project?.autoRefreshLogs
+      showToast(
+        'success', 
+        t('projects.autoRefreshToggled'), 
+        newState ? t('projects.autoRefreshEnabled') : t('projects.autoRefreshDisabled')
+      )
+    } catch (error) {
+      console.error('Error toggling auto refresh logs:', error)
+      showToast('error', t('projects.autoRefreshError'), t('projects.autoRefreshErrorDesc'))
+    }
   }
 
   const getStatusIcon = (status: string) => {
@@ -364,6 +381,23 @@ const Projects: React.FC = () => {
                     </a>
                   </div>
                 )}
+              </div>
+
+              {/* 自动刷新日志复选框 */}
+              <div className="flex items-center space-x-2 mb-3 p-2 bg-accent/30 rounded-lg">
+                <input
+                  type="checkbox"
+                  id={`auto-refresh-${project.id}`}
+                  checked={project.autoRefreshLogs || false}
+                  onChange={() => handleToggleAutoRefreshLogs(project.id)}
+                  className="w-4 h-4 text-primary bg-background border-border rounded focus:ring-primary focus:ring-2"
+                />
+                <label 
+                  htmlFor={`auto-refresh-${project.id}`}
+                  className="text-sm text-foreground cursor-pointer select-none"
+                >
+                  {t('projects.autoRefreshLogs')}
+                </label>
               </div>
 
               {/* 操作按钮 */}
