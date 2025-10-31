@@ -156,7 +156,8 @@
     "errorLevel": "Error",
     "waitingForLogs": "Waiting for log output...",
     "startProjectForLogs": "Start project to display log information",
-    "totalLogs": "Total {{count}} logs"
+    "totalLogs": "Total {{count}} logs",
+    "clearedBeforeStart": "Logs cleared before start"
   },
   "dashboard": {
     "title": "Dashboard",

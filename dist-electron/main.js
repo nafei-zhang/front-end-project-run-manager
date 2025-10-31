@@ -176,6 +176,13 @@ class ProcessManager {
         console.log("[ProcessManager] Project is already running");
         return { success: false, error: "Project is already running" };
       }
+      console.log("[ProcessManager] Clearing logs for project before start:", project.id);
+      this.logManager.clearProjectLogs(project.id);
+      this.logManager.addLog(project.id, {
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        level: "info",
+        message: "Logs cleared before project start"
+      });
       const command = this.buildCommand(project.packageManager, project.startCommand);
       console.log("[ProcessManager] Starting command:", command.cmd, command.args.join(" "));
       console.log("[ProcessManager] Working directory:", project.path);
@@ -252,91 +259,91 @@ class ProcessManager {
     console.log("[ProcessManager] Found running process, PID:", processInfo.pid);
     return new Promise((resolve) => {
       let isResolved = false;
-      let forceKillTimeout = null;
       const cleanup = () => {
         if (!isResolved) {
           isResolved = true;
-          if (forceKillTimeout) {
-            clearTimeout(forceKillTimeout);
-          }
           this.runningProcesses.delete(projectId);
           console.log("[ProcessManager] Removed process from running processes list");
         }
       };
-      const onExit = (code, signal) => {
-        console.log(`[ProcessManager] Process ${projectId} exited with code ${code}, signal ${signal}`);
-        cleanup();
-        this.logManager.addLog(projectId, {
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          level: "info",
-          message: `Project stopped (code: ${code}, signal: ${signal})`
-        });
-        if (this.onProjectStatusChange) {
-          console.log(`[ProcessManager] Notifying project status change to stopped for ${projectId}`);
-          this.onProjectStatusChange(projectId, "stopped");
-        }
-        if (!isResolved) {
-          resolve(true);
-        }
-      };
-      const onError = (error) => {
-        console.log(`[ProcessManager] Process ${projectId} error during stop:`, error.message);
-        if (error.message.includes("WebSocket") || error.message.includes("RSV1")) {
-          console.log("[ProcessManager] WebSocket error detected, treating as normal termination");
-          this.logManager.addLog(projectId, {
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            level: "info",
-            message: "Project stopped (WebSocket connection closed)"
-          });
-        } else {
-          this.logManager.addLog(projectId, {
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            level: "warn",
-            message: `Process error during stop: ${error.message}`
-          });
-        }
-        cleanup();
-        if (!isResolved) {
-          resolve(true);
-        }
-      };
-      processInfo.process.once("exit", onExit);
-      processInfo.process.once("error", onError);
+      this.logManager.addLog(projectId, {
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        level: "info",
+        message: "Force stopping project and all child processes..."
+      });
       try {
-        this.logManager.addLog(projectId, {
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          level: "info",
-          message: "Stopping project..."
-        });
-        console.log("[ProcessManager] Sending SIGTERM to process for graceful shutdown");
-        processInfo.process.kill("SIGTERM");
-        forceKillTimeout = setTimeout(() => {
-          if (!isResolved) {
-            console.log("[ProcessManager] Process did not exit gracefully, sending SIGKILL");
+        if (process.platform === "win32") {
+          console.log("[ProcessManager] Using taskkill to force terminate process tree on Windows");
+          const { spawn: spawn2 } = require("child_process");
+          const taskkill = spawn2("taskkill", ["/pid", processInfo.pid.toString(), "/t", "/f"], {
+            stdio: "pipe"
+          });
+          taskkill.on("close", (code) => {
+            console.log(`[ProcessManager] taskkill exited with code ${code}`);
+            this.logManager.addLog(projectId, {
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              level: "info",
+              message: `Process tree terminated (taskkill exit code: ${code})`
+            });
+            if (this.onProjectStatusChange) {
+              console.log(`[ProcessManager] Notifying project status change to stopped for ${projectId}`);
+              this.onProjectStatusChange(projectId, "stopped");
+            }
+            cleanup();
+            if (!isResolved) {
+              resolve(true);
+            }
+          });
+          taskkill.on("error", (error) => {
+            console.error("[ProcessManager] taskkill error:", error);
             try {
-              process.kill(processInfo.pid, 0);
-              console.log("[ProcessManager] Process still exists, force killing");
+              console.log("[ProcessManager] Fallback to SIGKILL after taskkill failure");
               processInfo.process.kill("SIGKILL");
               this.logManager.addLog(projectId, {
                 timestamp: (/* @__PURE__ */ new Date()).toISOString(),
                 level: "warn",
-                message: "Process force killed after timeout"
+                message: `Process force killed with SIGKILL (taskkill failed: ${error.message})`
               });
-            } catch (checkError) {
-              console.log("[ProcessManager] Process already terminated during force kill check");
-            }
-            setTimeout(() => {
+              if (this.onProjectStatusChange) {
+                this.onProjectStatusChange(projectId, "stopped");
+              }
+              cleanup();
               if (!isResolved) {
-                console.log("[ProcessManager] Force resolving after SIGKILL");
-                cleanup();
                 resolve(true);
               }
-            }, 1e3);
+            } catch (killError) {
+              console.error("[ProcessManager] SIGKILL also failed:", killError);
+              this.logManager.addLog(projectId, {
+                timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+                level: "error",
+                message: `Failed to stop process: ${killError instanceof Error ? killError.message : "Unknown error"}`
+              });
+              cleanup();
+              resolve(false);
+            }
+          });
+        } else {
+          console.log("[ProcessManager] Using SIGKILL on non-Windows system");
+          try {
+            process.kill(-processInfo.pid, "SIGKILL");
+            console.log("[ProcessManager] Sent SIGKILL to process group");
+          } catch (groupError) {
+            console.log("[ProcessManager] Process group kill failed, trying single process kill");
+            processInfo.process.kill("SIGKILL");
           }
-        }, 5e3);
-        console.log("[ProcessManager] Graceful stop initiated, waiting for process to exit...");
+          this.logManager.addLog(projectId, {
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            level: "info",
+            message: "Process force killed with SIGKILL"
+          });
+          if (this.onProjectStatusChange) {
+            this.onProjectStatusChange(projectId, "stopped");
+          }
+          cleanup();
+          resolve(true);
+        }
       } catch (error) {
-        console.error("[ProcessManager] Failed to send stop signal:", error);
+        console.error("[ProcessManager] Failed to force stop process:", error);
         this.logManager.addLog(projectId, {
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           level: "error",

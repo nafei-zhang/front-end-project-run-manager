@@ -32,6 +32,17 @@ export class ProcessManager {
         return { success: false, error: 'Project is already running' }
       }
 
+      // 启动项目前清理该项目的日志
+      console.log('[ProcessManager] Clearing logs for project before start:', project.id)
+      this.logManager.clearProjectLogs(project.id)
+      
+      // 记录清理日志的操作
+      this.logManager.addLog(project.id, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: 'Logs cleared before project start'
+      })
+
       // 构建命令
       const command = this.buildCommand(project.packageManager, project.startCommand)
       console.log('[ProcessManager] Starting command:', command.cmd, command.args.join(' '))
@@ -129,120 +140,124 @@ export class ProcessManager {
     console.log('[ProcessManager] Found running process, PID:', processInfo.pid)
 
     return new Promise((resolve) => {
-        let isResolved = false
-        let forceKillTimeout: NodeJS.Timeout | null = null
-        
-        const cleanup = () => {
-          if (!isResolved) {
-            isResolved = true
-            if (forceKillTimeout) {
-              clearTimeout(forceKillTimeout)
-            }
-            this.runningProcesses.delete(projectId)
-            console.log('[ProcessManager] Removed process from running processes list')
-          }
-        }
-
-      // 监听进程退出事件
-      const onExit = (code: number | null, signal: string | null) => {
-        console.log(`[ProcessManager] Process ${projectId} exited with code ${code}, signal ${signal}`)
-        cleanup()
-        
-        this.logManager.addLog(projectId, {
-          timestamp: new Date().toISOString(),
-          level: 'info',
-          message: `Project stopped (code: ${code}, signal: ${signal})`
-        })
-        
-        // 通知项目状态变更
-        if (this.onProjectStatusChange) {
-          console.log(`[ProcessManager] Notifying project status change to stopped for ${projectId}`)
-          this.onProjectStatusChange(projectId, 'stopped')
-        }
-        
+      let isResolved = false
+      
+      const cleanup = () => {
         if (!isResolved) {
-          resolve(true)
+          isResolved = true
+          this.runningProcesses.delete(projectId)
+          console.log('[ProcessManager] Removed process from running processes list')
         }
       }
 
-      // 监听进程错误事件
-      const onError = (error: Error) => {
-        console.log(`[ProcessManager] Process ${projectId} error during stop:`, error.message)
-        
-        // 特殊处理WebSocket错误
-        if (error.message.includes('WebSocket') || error.message.includes('RSV1')) {
-          console.log('[ProcessManager] WebSocket error detected, treating as normal termination')
+      // 记录停止开始
+      this.logManager.addLog(projectId, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: 'Force stopping project and all child processes...'
+      })
+
+      try {
+        // 在Windows上使用taskkill强制终止整个进程树
+        if (process.platform === 'win32') {
+          console.log('[ProcessManager] Using taskkill to force terminate process tree on Windows')
+          
+          const { spawn } = require('child_process')
+          const taskkill = spawn('taskkill', ['/pid', processInfo.pid.toString(), '/t', '/f'], {
+            stdio: 'pipe'
+          })
+
+          taskkill.on('close', (code) => {
+            console.log(`[ProcessManager] taskkill exited with code ${code}`)
+            
+            this.logManager.addLog(projectId, {
+              timestamp: new Date().toISOString(),
+              level: 'info',
+              message: `Process tree terminated (taskkill exit code: ${code})`
+            })
+
+            // 通知项目状态变更
+            if (this.onProjectStatusChange) {
+              console.log(`[ProcessManager] Notifying project status change to stopped for ${projectId}`)
+              this.onProjectStatusChange(projectId, 'stopped')
+            }
+
+            cleanup()
+            if (!isResolved) {
+              resolve(true)
+            }
+          })
+
+          taskkill.on('error', (error) => {
+            console.error('[ProcessManager] taskkill error:', error)
+            
+            // 如果taskkill失败，尝试使用SIGKILL
+            try {
+              console.log('[ProcessManager] Fallback to SIGKILL after taskkill failure')
+              processInfo.process.kill('SIGKILL')
+              
+              this.logManager.addLog(projectId, {
+                timestamp: new Date().toISOString(),
+                level: 'warn',
+                message: `Process force killed with SIGKILL (taskkill failed: ${error.message})`
+              })
+
+              // 通知项目状态变更
+              if (this.onProjectStatusChange) {
+                this.onProjectStatusChange(projectId, 'stopped')
+              }
+
+              cleanup()
+              if (!isResolved) {
+                resolve(true)
+              }
+            } catch (killError) {
+              console.error('[ProcessManager] SIGKILL also failed:', killError)
+              
+              this.logManager.addLog(projectId, {
+                timestamp: new Date().toISOString(),
+                level: 'error',
+                message: `Failed to stop process: ${killError instanceof Error ? killError.message : 'Unknown error'}`
+              })
+
+              cleanup()
+              resolve(false)
+            }
+          })
+
+          // 不设置超时，立即处理结果
+
+        } else {
+          // 非Windows系统，直接使用SIGKILL
+          console.log('[ProcessManager] Using SIGKILL on non-Windows system')
+          
+          try {
+            // 尝试终止进程组（如果支持的话）
+            process.kill(-processInfo.pid, 'SIGKILL')
+            console.log('[ProcessManager] Sent SIGKILL to process group')
+          } catch (groupError) {
+            // 如果进程组终止失败，尝试终止单个进程
+            console.log('[ProcessManager] Process group kill failed, trying single process kill')
+            processInfo.process.kill('SIGKILL')
+          }
+
           this.logManager.addLog(projectId, {
             timestamp: new Date().toISOString(),
             level: 'info',
-            message: 'Project stopped (WebSocket connection closed)'
+            message: 'Process force killed with SIGKILL'
           })
-        } else {
-          this.logManager.addLog(projectId, {
-            timestamp: new Date().toISOString(),
-            level: 'warn',
-            message: `Process error during stop: ${error.message}`
-          })
-        }
-        
-        cleanup()
-        if (!isResolved) {
+
+          // 通知项目状态变更
+          if (this.onProjectStatusChange) {
+            this.onProjectStatusChange(projectId, 'stopped')
+          }
+
+          cleanup()
           resolve(true)
         }
-      }
-
-      // 添加事件监听器
-      processInfo.process.once('exit', onExit)
-      processInfo.process.once('error', onError)
-
-      try {
-        // 记录停止开始
-        this.logManager.addLog(projectId, {
-          timestamp: new Date().toISOString(),
-          level: 'info',
-          message: 'Stopping project...'
-        })
-
-        // 第一步：发送SIGTERM信号，给进程时间优雅关闭
-        console.log('[ProcessManager] Sending SIGTERM to process for graceful shutdown')
-        processInfo.process.kill('SIGTERM')
-
-        // 设置超时机制：如果5秒内进程没有退出，则强制终止
-         forceKillTimeout = setTimeout(() => {
-           if (!isResolved) {
-             console.log('[ProcessManager] Process did not exit gracefully, sending SIGKILL')
-             
-             try {
-               // 检查进程是否仍然存在
-               process.kill(processInfo.pid, 0)
-               console.log('[ProcessManager] Process still exists, force killing')
-               processInfo.process.kill('SIGKILL')
-               
-               this.logManager.addLog(projectId, {
-                 timestamp: new Date().toISOString(),
-                 level: 'warn',
-                 message: 'Process force killed after timeout'
-               })
-             } catch (checkError) {
-               // 进程已经不存在了
-               console.log('[ProcessManager] Process already terminated during force kill check')
-             }
-
-             // 如果强制杀死后还没有resolve，则手动cleanup和resolve
-             setTimeout(() => {
-               if (!isResolved) {
-                 console.log('[ProcessManager] Force resolving after SIGKILL')
-                 cleanup()
-                 resolve(true)
-               }
-             }, 1000)
-           }
-         }, 5000) // 5秒超时
-
-        console.log('[ProcessManager] Graceful stop initiated, waiting for process to exit...')
         
       } catch (error) {
-        console.error('[ProcessManager] Failed to send stop signal:', error)
+        console.error('[ProcessManager] Failed to force stop process:', error)
         
         this.logManager.addLog(projectId, {
           timestamp: new Date().toISOString(),

@@ -155,7 +155,8 @@
     "errorLevel": "错误",
     "waitingForLogs": "等待日志输出...",
     "startProjectForLogs": "启动项目后将显示日志信息",
-    "totalLogs": "共 {{count}} 条日志"
+    "totalLogs": "共 {{count}} 条日志",
+    "clearedBeforeStart": "启动前已清理日志"
   },
   "dashboard": {
     "title": "仪表板",

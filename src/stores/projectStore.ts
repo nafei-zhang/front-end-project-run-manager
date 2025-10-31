@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { useLogStore } from './logStore'
 
 interface Project {
   id: string
@@ -212,17 +211,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   startProject: async (id: string) => {
     console.log('[ProjectStore] startProject called for id:', id)
-    
-    // 在启动项目之前清理该项目的日志
-    try {
-      const logStore = useLogStore.getState()
-      logStore.clearProjectLogs(id)
-      console.log('[ProjectStore] Cleared logs for project:', id)
-    } catch (error) {
-      console.warn('[ProjectStore] Failed to clear logs before starting project:', error)
-      // 即使清理日志失败，也继续启动项目
-    }
-    
     try {
       if (isElectron()) {
         console.log('[ProjectStore] Calling electronAPI.projects.start')
