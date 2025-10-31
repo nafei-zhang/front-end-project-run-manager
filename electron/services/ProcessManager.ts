@@ -167,7 +167,7 @@ export class ProcessManager {
             stdio: 'pipe'
           })
 
-          taskkill.on('close', (code) => {
+          taskkill.on('close', (code: number | null) => {
             console.log(`[ProcessManager] taskkill exited with code ${code}`)
             
             this.logManager.addLog(projectId, {
@@ -188,7 +188,7 @@ export class ProcessManager {
             }
           })
 
-          taskkill.on('error', (error) => {
+          taskkill.on('error', (error: Error) => {
             console.error('[ProcessManager] taskkill error:', error)
             
             // 如果taskkill失败，尝试使用SIGKILL
