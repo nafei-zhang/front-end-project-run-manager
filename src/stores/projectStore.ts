@@ -44,6 +44,9 @@ const isElectron = () => {
   return typeof window !== 'undefined' && window.electronAPI !== undefined
 }
 
+// 是否已订阅 Electron 主动状态变更事件（避免重复订阅）
+let statusSubscribed = false
+
 // 模拟项目数据（用于浏览器环境测试）
 const mockProjects: Project[] = [
   {
@@ -85,6 +88,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         const projects = await window.electronAPI.projects.getAll()
         console.log('Projects loaded:', projects) // 添加调试日志
         set({ projects, loading: false })
+        // Electron 环境下仅订阅一次主进程的状态变更事件，实现实时刷新
+        if (!statusSubscribed) {
+          try {
+            window.electronAPI.projects.onStatusChange(({ id, status }) => {
+              set(state => ({
+                projects: state.projects.map(p => p.id === id ? {
+                  ...p,
+                  status: status as 'stopped' | 'running' | 'error',
+                  ...(status === 'stopped' ? { pid: undefined, url: undefined, port: undefined } : {}),
+                  updatedAt: new Date().toISOString()
+                } : p)
+              }))
+            })
+            statusSubscribed = true
+            console.log('[ProjectStore] Subscribed to projects:statusChanged')
+          } catch (err) {
+            console.warn('[ProjectStore] Failed to subscribe to projects:statusChanged:', err)
+          }
+        }
       } else {
         console.log('Running in browser mode, using mock data') // 添加调试日志
         // 在浏览器环境中使用模拟数据
@@ -262,27 +284,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         console.log('[ProjectStore] Stop project result:', success)
         
         if (success) {
-          console.log('[ProjectStore] Project stopped successfully, updating status')
-          // 直接更新本地状态，避免调用updateProject导致loading状态变化
-          const { projects } = get()
-          console.log('[ProjectStore] Current projects before update:', projects.map(p => ({ id: p.id, status: p.status })))
-          
-          const updatedProjects = projects.map(p => 
-            p.id === id ? { ...p, status: 'stopped' as const, pid: undefined, url: undefined, port: undefined, updatedAt: new Date().toISOString() } : p
-          )
-          
-          console.log('[ProjectStore] Updated projects:', updatedProjects.map(p => ({ id: p.id, status: p.status })))
-          
-          // 强制触发状态更新，确保React组件重新渲染
-          set({ projects: updatedProjects, error: null })
-          
-          console.log('[ProjectStore] Project status updated to stopped')
-          
-          // 验证状态是否真的更新了
-          const { projects: newProjects } = get()
-          const updatedProject = newProjects.find(p => p.id === id)
-          console.log('[ProjectStore] Verification - updated project status:', updatedProject?.status)
-          
+          console.log('[ProjectStore] Project stopped successfully, updating status (functional set)')
+          // 使用函数式 set，避免并发批量停止时相互覆盖导致状态不更新
+          set(state => ({
+            projects: state.projects.map(p => 
+              p.id === id 
+                ? { 
+                    ...p, 
+                    status: 'stopped' as const, 
+                    pid: undefined, 
+                    url: undefined, 
+                    port: undefined, 
+                    updatedAt: new Date().toISOString() 
+                  } 
+                : p
+            ),
+            error: null
+          }))
+          console.log('[ProjectStore] Project status updated to stopped via functional set')
           return true
         } else {
           console.error('[ProjectStore] Failed to stop project')
@@ -291,25 +310,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       } else {
         console.log('[ProjectStore] Running in browser mode, simulating stop project')
         // 在浏览器环境中模拟停止项目
-        const { projects } = get()
-        console.log('[ProjectStore] Current projects before update:', projects.map(p => ({ id: p.id, status: p.status })))
-        
-        const updatedProjects = projects.map(p => 
-          p.id === id ? { ...p, status: 'stopped' as const, pid: undefined, url: undefined, port: undefined, updatedAt: new Date().toISOString() } : p
-        )
-        
-        console.log('[ProjectStore] Updated projects:', updatedProjects.map(p => ({ id: p.id, status: p.status })))
-        
-        // 强制触发状态更新，确保React组件重新渲染
-        set({ projects: updatedProjects, error: null })
-        
-        console.log('[ProjectStore] Project status updated to stopped (simulated)')
-        
-        // 验证状态是否真的更新了
-        const { projects: newProjects } = get()
-        const updatedProject = newProjects.find(p => p.id === id)
-        console.log('[ProjectStore] Verification - updated project status:', updatedProject?.status)
-        
+        // 浏览器模式下也使用函数式 set，避免并发覆盖
+        set(state => ({
+          projects: state.projects.map(p => 
+            p.id === id 
+              ? { 
+                  ...p, 
+                  status: 'stopped' as const, 
+                  pid: undefined, 
+                  url: undefined, 
+                  port: undefined, 
+                  updatedAt: new Date().toISOString() 
+                } 
+              : p
+          ),
+          error: null
+        }))
+        console.log('[ProjectStore] Project status updated to stopped (simulated, functional set)')
         return true
       }
       return false
@@ -330,7 +347,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         console.log('[ProjectStore] Received status:', status)
         const { projects } = get()
         const updatedProjects = projects.map(p => 
-          p.id === id ? { ...p, status: status as 'stopped' | 'running' | 'error', updatedAt: new Date().toISOString() } : p
+          p.id === id 
+            ? { 
+                ...p, 
+                status: status as 'stopped' | 'running' | 'error', 
+                // 当状态为 stopped 时，确保 pid/url/port 一并清空，避免 UI 误判
+                ...(status === 'stopped' ? { pid: undefined, url: undefined, port: undefined } : {}),
+                updatedAt: new Date().toISOString() 
+              } 
+            : p
         )
         set({ projects: updatedProjects })
       } else {

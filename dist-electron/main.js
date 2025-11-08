@@ -222,6 +222,10 @@ class ProcessManager {
           level: code === 0 ? "info" : "error",
           message: `Process exited with code ${code} ${signal ? `(${signal})` : ""}`
         });
+        if (this.onProjectStatusChange) {
+          console.log(`[ProcessManager] Notifying project status change to stopped on exit for ${project.id}`);
+          this.onProjectStatusChange(project.id, "stopped");
+        }
       });
       childProcess.on("error", (error) => {
         console.log("[ProcessManager] Process error:", project.id, error.message);
@@ -232,6 +236,10 @@ class ProcessManager {
           level: "error",
           message: `Process error: ${error.message}`
         });
+        if (this.onProjectStatusChange) {
+          console.log(`[ProcessManager] Notifying project status change to stopped on error for ${project.id}`);
+          this.onProjectStatusChange(project.id, "stopped");
+        }
       });
       this.logManager.addLog(project.id, {
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -926,6 +934,13 @@ function initializeServices() {
         port: void 0
       });
     }
+    if (mainWindow) {
+      try {
+        mainWindow.webContents.send("projects:statusChanged", { id: projectId, status });
+      } catch (err) {
+        console.warn("[Main] Failed to send projects:statusChanged:", err);
+      }
+    }
   });
   projectManager.resetAllProjectsToStopped();
 }
@@ -959,6 +974,13 @@ function setupIpcHandlers() {
         pid: void 0
       });
       console.log("[IPC] Project status updated successfully");
+      if (mainWindow) {
+        try {
+          mainWindow.webContents.send("projects:statusChanged", { id, status: "stopped" });
+        } catch (err) {
+          console.warn("[IPC] Failed to send projects:statusChanged:", err);
+        }
+      }
     } else {
       console.log("[IPC] Failed to stop project, not updating status");
     }

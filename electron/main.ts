@@ -91,6 +91,14 @@ function initializeServices() {
         port: undefined
       })
     }
+    // 主动通知渲染进程状态变更，确保前端无需依赖轮询即可及时更新
+    if (mainWindow) {
+      try {
+        mainWindow.webContents.send('projects:statusChanged', { id: projectId, status })
+      } catch (err) {
+        console.warn('[Main] Failed to send projects:statusChanged:', err)
+      }
+    }
   })
   
   // 应用启动时重置所有项目状态为停止状态
@@ -134,6 +142,14 @@ function setupIpcHandlers() {
         pid: undefined 
       })
       console.log('[IPC] Project status updated successfully')
+      // 向渲染进程广播状态更新事件
+      if (mainWindow) {
+        try {
+          mainWindow.webContents.send('projects:statusChanged', { id, status: 'stopped' })
+        } catch (err) {
+          console.warn('[IPC] Failed to send projects:statusChanged:', err)
+        }
+      }
     } else {
       console.log('[IPC] Failed to stop project, not updating status')
     }

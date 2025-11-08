@@ -13,7 +13,8 @@ import {
   Edit,
   Trash2,
   Search,
-  Filter
+  Filter,
+  Loader2
 } from 'lucide-react'
 import ProjectForm from '../components/ProjectForm'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -30,6 +31,7 @@ const Projects: React.FC = () => {
     startProject, 
     stopProject,
     deleteProject,
+    refreshProjectStatus,
     refreshAllProjects,
     toggleAutoRefreshLogs
   } = useProjectStore()
@@ -41,10 +43,41 @@ const Projects: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [stopConfirm, setStopConfirm] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set())
+  const [bulkStarting, setBulkStarting] = useState(false)
+  const [bulkStopConfirmOpen, setBulkStopConfirmOpen] = useState(false)
+  const SELECTION_STORAGE_KEY = 'selectedProjectIds'
 
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
+
+  // 加载并同步选中集合（持久化）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SELECTION_STORAGE_KEY)
+      if (raw) {
+        const ids: string[] = JSON.parse(raw)
+        setSelectedProjects(new Set(ids))
+      }
+    } catch (e) {
+      console.warn('[Projects] Failed to load selection from storage:', e)
+    }
+  }, [])
+
+  // 当项目列表变化时，清理不存在的选中项并保存
+  useEffect(() => {
+    setSelectedProjects(prev => {
+      const existingIds = new Set(projects.map(p => p.id))
+      const next = new Set(Array.from(prev).filter(id => existingIds.has(id)))
+      try {
+        localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(Array.from(next)))
+      } catch (e) {
+        console.warn('[Projects] Failed to persist selection to storage:', e)
+      }
+      return next
+    })
+  }, [projects])
 
   const handleCreateProject = () => {
     console.log('handleCreateProject called') // 添加调试日志
@@ -108,6 +141,92 @@ const Projects: React.FC = () => {
     setStopConfirm(projectId)
   }
 
+  // 选择相关
+  const isSelected = (projectId: string) => selectedProjects.has(projectId)
+  const toggleSelection = (projectId: string) => {
+    setSelectedProjects(prev => {
+      const next = new Set(prev)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      try {
+        localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(Array.from(next)))
+      } catch (e) {
+        console.warn('[Projects] Failed to persist selection to storage:', e)
+      }
+      return next
+    })
+  }
+
+  // 一键启动所选项目
+  const startSelectedProjects = async () => {
+    if (selectedProjects.size === 0) return
+    setBulkStarting(true)
+    try {
+      const ids = Array.from(selectedProjects)
+      const startable = ids.filter(id => {
+        const p = projects.find(p => p.id === id)
+        return p && p.status === 'stopped'
+      })
+      if (startable.length === 0) {
+        // 标题使用统一的批量启动结果，内容提示无可启动项
+        showToast('info', t('projects.bulkStartResult'), t('projects.noSelectableProjects'))
+        return
+      }
+      let success = 0
+      let failed = 0
+      for (const id of startable) {
+        const ok = await startProject(id)
+        if (ok) success++
+        else failed++
+      }
+      showToast('success', t('projects.bulkStartResult'), t('projects.bulkStartDesc', { success, failed }))
+    } catch (e) {
+      console.error('[Projects] Bulk start error:', e)
+      showToast('error', t('projects.startError'), t('projects.refreshErrorDesc'))
+    } finally {
+      setBulkStarting(false)
+      // 保留选中状态，不再自动清空
+    }
+  }
+
+  // 一键停止所选正在运行的项目
+  const [bulkStopping, setBulkStopping] = useState(false)
+  const stopSelectedProjects = async () => {
+    if (selectedProjects.size === 0) return
+    setBulkStopping(true)
+    try {
+      const ids = Array.from(selectedProjects)
+      const stoppable = ids.filter(id => {
+        const p = projects.find(p => p.id === id)
+        return p && p.status === 'running'
+      })
+      if (stoppable.length === 0) {
+        showToast('info', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('projects.noRunningSelected', { defaultValue: '没有正在运行的选中项目' }))
+        return
+      }
+      // 并行停止所有可停止的项目
+      const results = await Promise.allSettled(stoppable.map(id => stopProject(id)))
+      let success = 0
+      let failed = 0
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) success++
+        else failed++
+      }
+      // 确认状态最新，避免渲染滞后
+      await refreshAllProjects()
+      showToast(success > 0 ? 'success' : 'info', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('projects.bulkStopDesc', { success, failed, defaultValue: '成功停止 {{success}} 个，失败 {{failed}} 个' }))
+    } catch (e) {
+      console.error('[Projects] Bulk stop error:', e)
+      showToast('error', t('projects.startError'), t('projects.refreshErrorDesc'))
+    } finally {
+      setBulkStopping(false)
+    }
+  }
+
+  // 计算按钮状态：有选中正在运行 -> 显示一键停止，否则显示一键启动
+  const hasRunningSelected = projects.some(p => selectedProjects.has(p.id) && p.status === 'running')
+  const runningSelectedCount = projects.filter(p => selectedProjects.has(p.id) && p.status === 'running').length
+
   const confirmStopProject = async () => {
     console.log('[Projects] confirmStopProject called')
     if (stopConfirm) {
@@ -115,7 +234,10 @@ const Projects: React.FC = () => {
       const success = await stopProject(stopConfirm)
       console.log('[Projects] Stop project result:', success)
       if (success) {
-        console.log('[Projects] Project stopped successfully, closing modal')
+        console.log('[Projects] Project stopped successfully, refreshing status and list')
+        // 先刷新该项目状态，再刷新全量，避免局部未更新导致按钮不切换
+        await refreshProjectStatus(stopConfirm)
+        await refreshAllProjects()
         setStopConfirm(null)
       } else {
         console.error('[Projects] Failed to stop project, keeping modal open')
@@ -196,7 +318,7 @@ const Projects: React.FC = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 pb-20">
       {/* 页面标题和操作 */}
       <div className="flex items-center justify-between">
         <div>
@@ -311,6 +433,16 @@ const Projects: React.FC = () => {
             >
               {/* 项目头部 */}
               <div className="flex items-start justify-between mb-3">
+                {/* 选择复选框 */}
+                <div className="mr-3 mt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={isSelected(project.id)}
+                    onChange={() => toggleSelection(project.id)}
+                    className="w-4 h-4 text-primary bg-background border-border rounded focus:ring-primary focus:ring-2"
+                    aria-label={t('projects.selectProject') || 'Select project'}
+                  />
+                </div>
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
                     {getStatusIcon(project.status)}
@@ -441,6 +573,45 @@ const Projects: React.FC = () => {
         </div>
       )}
 
+      {/* 固定底栏：一键启动/停止 */}
+      <div className="fixed inset-x-0 bottom-0 z-40 bg-card border-t border-border shadow-lg">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-end">
+          {hasRunningSelected ? (
+            <button
+              onClick={() => setBulkStopConfirmOpen(true)}
+              disabled={bulkStopping}
+              className="flex items-center space-x-2 px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bulkStopping ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Square className="w-4 h-4" />
+              )}
+              <span className="font-medium">{t('projects.bulkStop', { defaultValue: '一键停止' })}</span>
+              {selectedProjects.size > 0 && (
+                <span className="text-xs opacity-80">({selectedProjects.size})</span>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={startSelectedProjects}
+              disabled={bulkStarting || selectedProjects.size === 0}
+              className="flex items-center space-x-2 px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bulkStarting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+              <span className="font-medium">{t('projects.bulkStart')}</span>
+              {selectedProjects.size > 0 && (
+                <span className="text-xs opacity-80">({selectedProjects.size})</span>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* 项目表单模态框 */}
       {showForm && (
         <ProjectForm
@@ -466,6 +637,18 @@ const Projects: React.FC = () => {
         cancelText={t('projects.cancel')}
         onConfirm={confirmStopProject}
         onCancel={cancelStopProject}
+        confirmButtonClass="bg-red-600 hover:bg-red-700"
+      />
+
+      {/* 批量停止确认对话框 */}
+      <ConfirmDialog
+        isOpen={bulkStopConfirmOpen}
+        title={t('projects.bulkStopConfirmTitle', { defaultValue: '确认批量停止' })}
+        message={t('projects.bulkStopConfirmMessage', { count: runningSelectedCount, defaultValue: `确定要停止选中的正在运行项目吗？（${runningSelectedCount} 个）` })}
+        confirmText={t('projects.confirm', { defaultValue: '确认' })}
+        cancelText={t('projects.cancel', { defaultValue: '取消' })}
+        onConfirm={() => { setBulkStopConfirmOpen(false); stopSelectedProjects() }}
+        onCancel={() => setBulkStopConfirmOpen(false)}
         confirmButtonClass="bg-red-600 hover:bg-red-700"
       />
     </div>

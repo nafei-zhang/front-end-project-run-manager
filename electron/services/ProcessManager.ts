@@ -94,6 +94,11 @@ export class ProcessManager {
           level: code === 0 ? 'info' : 'error',
           message: `Process exited with code ${code} ${signal ? `(${signal})` : ''}`
         })
+        // 进程退出后，通知项目状态变更为 stopped，确保持久化状态与前端一致
+        if (this.onProjectStatusChange) {
+          console.log(`[ProcessManager] Notifying project status change to stopped on exit for ${project.id}`)
+          this.onProjectStatusChange(project.id, 'stopped')
+        }
       })
 
       childProcess.on('error', (error) => {
@@ -105,6 +110,11 @@ export class ProcessManager {
           level: 'error',
           message: `Process error: ${error.message}`
         })
+        // 进程错误时同样通知状态为 stopped，避免卡在 running 状态
+        if (this.onProjectStatusChange) {
+          console.log(`[ProcessManager] Notifying project status change to stopped on error for ${project.id}`)
+          this.onProjectStatusChange(project.id, 'stopped')
+        }
       })
 
       // 添加启动日志

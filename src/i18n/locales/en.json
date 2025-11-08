@@ -44,7 +44,8 @@
     "systemStatus": "System Status",
     "memoryUsage": "Memory Usage",
     "cpuUsage": "CPU Usage",
-    "diskSpace": "Disk Space"
+    "diskSpace": "Disk Space",
+    "projectList": "Project List"
   },
   "projects": {
     "title": "Project Management",
@@ -101,7 +102,18 @@
     "autoRefreshEnabled": "Auto-refresh logs enabled",
     "autoRefreshDisabled": "Auto-refresh logs disabled",
     "autoRefreshError": "Failed to update auto-refresh setting",
-    "autoRefreshErrorDesc": "Unable to update auto-refresh setting, please try again"
+    "autoRefreshErrorDesc": "Unable to update auto-refresh setting, please try again",
+    "bulkStart": "Start Selected",
+    "bulkStop": "Stop Selected",
+    "bulkStartResult": "No select project  to start.",
+    "bulkStartDesc": "Started {{success}} projects, failed {{failed}}",
+    "bulkStopResult": "Stop Completed",
+    "bulkStopDesc": "Stopped {{success}} projects, failed {{failed}}",
+    "noSelectableProjects": "No selected projects can be started",
+    "noRunningSelected": "No running selected projects",
+    "bulkStopConfirmTitle": "Confirm Bulk Stop",
+    "bulkStopConfirmMessage": "Are you sure to stop selected running projects? ({{count}})",
+    "selectProject": "Select project"
   },
   "projectForm": {
     "title": "Add Project",
@@ -158,21 +170,6 @@
     "startProjectForLogs": "Start project to display log information",
     "totalLogs": "Total {{count}} logs",
     "clearedBeforeStart": "Logs cleared before start"
-  },
-  "dashboard": {
-    "title": "Dashboard",
-    "subtitle": "Overview of your development projects",
-    "totalProjects": "Total Projects",
-    "runningProjects": "Running Projects",
-    "recentActivity": "Recent Activity",
-    "quickActions": "Quick Actions",
-    "createProject": "Create New Project",
-    "viewAllProjects": "View All Projects",
-    "systemStatus": "System Status",
-    "memoryUsage": "Memory Usage",
-    "cpuUsage": "CPU Usage",
-    "diskSpace": "Disk Space",
-    "projectList": "Project List"
   },
   "settings": {
     "title": "Application Settings",

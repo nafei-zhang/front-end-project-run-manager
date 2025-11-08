@@ -100,7 +100,18 @@
     "autoRefreshEnabled": "已启用自动刷新日志",
     "autoRefreshDisabled": "已禁用自动刷新日志",
     "autoRefreshError": "更新自动刷新设置失败",
-    "autoRefreshErrorDesc": "无法更新自动刷新设置，请稍后重试"
+    "autoRefreshErrorDesc": "无法更新自动刷新设置，请稍后重试",
+    "bulkStart": "一键启动",
+    "bulkStop": "一键停止",
+    "bulkStartResult": "启动完成",
+    "bulkStartDesc": "成功启动 {{success}} 个，失败 {{failed}} 个",
+    "bulkStopResult": "停止完成",
+    "bulkStopDesc": "成功停止 {{success}} 个，失败 {{failed}} 个",
+    "noSelectableProjects": "已选项目中无可启动项",
+    "noRunningSelected": "没有正在运行的选中项目",
+    "bulkStopConfirmTitle": "确认批量停止",
+    "bulkStopConfirmMessage": "确定要停止选中的正在运行项目吗？（{{count}} 个）",
+    "selectProject": "选择项目"
   },
   "projectForm": {
     "title": "添加项目",

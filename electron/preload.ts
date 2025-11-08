@@ -12,6 +12,8 @@ export interface ElectronAPI {
     start: (id: string) => Promise<{ success: boolean; pid?: number; error?: string }>
     stop: (id: string) => Promise<boolean>
     getStatus: (id: string) => Promise<ProjectStatus>
+    onStatusChange: (callback: (data: { id: string; status: ProjectStatus }) => void) => void
+    removeStatusChangeListeners: () => void
   }
 
   // 日志管理
@@ -99,7 +101,13 @@ const electronAPI: ElectronAPI = {
     getRunning: () => ipcRenderer.invoke('projects:getRunning'),
     start: (id) => ipcRenderer.invoke('projects:start', id),
     stop: (id) => ipcRenderer.invoke('projects:stop', id),
-    getStatus: (id) => ipcRenderer.invoke('projects:getStatus', id)
+    getStatus: (id) => ipcRenderer.invoke('projects:getStatus', id),
+    onStatusChange: (callback) => {
+      ipcRenderer.on('projects:statusChanged', (_, data) => callback(data))
+    },
+    removeStatusChangeListeners: () => {
+      ipcRenderer.removeAllListeners('projects:statusChanged')
+    }
   },
 
   logs: {

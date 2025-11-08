@@ -12,7 +12,8 @@ import {
   CheckCircle,
   Clock,
   FolderOpen,
-  Terminal
+  Terminal,
+  Loader2
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -28,6 +29,7 @@ const Dashboard: React.FC = () => {
     loadProjects, 
     startProject, 
     stopProject,
+    refreshProjectStatus,
     refreshAllProjects,
     toggleAutoRefreshLogs
   } = useProjectStore()
@@ -35,16 +37,65 @@ const Dashboard: React.FC = () => {
   const { setActiveProject } = useLogStore()
   const [refreshing, setRefreshing] = useState(false)
   const [stopConfirm, setStopConfirm] = useState<string | null>(null)
+  const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set())
+  const SELECTION_STORAGE_KEY = 'selectedProjectIds'
+  const [bulkStarting, setBulkStarting] = useState(false)
+  const [bulkStopConfirmOpen, setBulkStopConfirmOpen] = useState(false)
 
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
+
+  // 加载并同步选中集合（持久化）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SELECTION_STORAGE_KEY)
+      if (raw) {
+        const ids: string[] = JSON.parse(raw)
+        setSelectedProjects(new Set(ids))
+      }
+    } catch (e) {
+      console.warn('[Dashboard] Failed to load selection from storage:', e)
+    }
+  }, [])
+
+  // 当项目列表变化时，清理不存在的选中项并保存
+  useEffect(() => {
+    setSelectedProjects(prev => {
+      const existingIds = new Set(projects.map(p => p.id))
+      const next = new Set(Array.from(prev).filter(id => existingIds.has(id)))
+      try {
+        localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(Array.from(next)))
+      } catch (e) {
+        console.warn('[Dashboard] Failed to persist selection to storage:', e)
+      }
+      return next
+    })
+  }, [projects])
 
   const handleStartProject = async (projectId: string) => {
     const success = await startProject(projectId)
     if (success) {
       setActiveProject(projectId)
     }
+  }
+
+  const isSelected = (projectId: string) => selectedProjects.has(projectId)
+  const toggleSelection = (projectId: string) => {
+    setSelectedProjects(prev => {
+      const next = new Set(prev)
+      if (next.has(projectId)) {
+        next.delete(projectId)
+      } else {
+        next.add(projectId)
+      }
+      try {
+        localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(Array.from(next)))
+      } catch (e) {
+        console.warn('[Dashboard] Failed to persist selection to storage:', e)
+      }
+      return next
+    })
   }
 
   const handleStopProject = async (projectId: string) => {
@@ -58,7 +109,10 @@ const Dashboard: React.FC = () => {
       const success = await stopProject(stopConfirm)
       console.log('[Dashboard] Stop project result:', success)
       if (success) {
-        console.log('[Dashboard] Project stopped successfully, closing modal')
+        console.log('[Dashboard] Project stopped successfully, refreshing status and list')
+        // 先刷新该项目状态，再刷新全量，避免局部未更新导致按钮不切换
+        await refreshProjectStatus(stopConfirm)
+        await refreshAllProjects()
         setStopConfirm(null)
       } else {
         console.error('[Dashboard] Failed to stop project, keeping modal open')
@@ -69,6 +123,124 @@ const Dashboard: React.FC = () => {
   const cancelStopProject = () => {
     setStopConfirm(null)
   }
+
+  // 批量停止所选正在运行的项目
+  const [bulkStopping, setBulkStopping] = useState(false)
+  const stopSelectedProjects = async () => {
+    if (selectedProjects.size === 0) {
+      showToast('info', t('projects.noSelectableProjects'), t('projects.noSelectableProjects'))
+      return
+    }
+    setBulkStopping(true)
+    try {
+      const ids = Array.from(selectedProjects)
+      const stoppable = ids.filter(id => {
+        const project = projects.find(p => p.id === id)
+        return project && project.status === 'running'
+      })
+      if (stoppable.length === 0) {
+        await refreshAllProjects()
+        showToast('info', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('projects.noRunningSelected', { defaultValue: '没有正在运行的选中项目' }))
+        setBulkStopping(false)
+        return
+      }
+      const results = await Promise.allSettled(stoppable.map(id => stopProject(id)))
+      let successCount = 0
+      let failCount = 0
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) successCount += 1
+        else failCount += 1
+      }
+      // 先逐个刷新已停止项目的状态，确保卡片按钮立即切换
+      if (successCount > 0) {
+        await Promise.allSettled(stoppable.map(id => refreshProjectStatus(id)))
+      }
+      // 再做一次全量刷新，确保整个列表与统计同步
+      await refreshAllProjects()
+      // 由于进程强杀存在极短延时，这里加一次延迟全量刷新兜底，确保状态完全切换
+      setTimeout(() => {
+        refreshAllProjects()
+      }, 600)
+      if (successCount === 0) {
+        showToast('info', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('projects.noRunningSelected', { defaultValue: '没有正在运行的选中项目' }))
+      } else {
+        showToast(
+          failCount === 0 ? 'success' : 'info',
+          t('projects.bulkStopResult', { defaultValue: '批量停止结果' }),
+          t('projects.bulkStopDesc', { success: successCount, failed: failCount, defaultValue: '成功停止 {{success}} 个，失败 {{failed}} 个' })
+        )
+      }
+    } catch (error) {
+      console.error('Error bulk stopping projects:', error)
+      showToast('error', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('errors.unknownError'))
+    } finally {
+      // 兜底关闭所有处理中的 loading 状态，避免底栏一直转圈
+      setBulkStopping(false)
+      setBulkStarting(false)
+    }
+  }
+
+  // 计算按钮状态：有选中正在运行 -> 显示一键停止，否则显示一键启动
+  const hasRunningSelected = projects.some(p => selectedProjects.has(p.id) && p.status === 'running')
+  const isProcessing = bulkStarting || bulkStopping
+  const runningSelectedCount = projects.filter(p => selectedProjects.has(p.id) && p.status === 'running').length
+
+  const startSelectedProjects = async () => {
+    if (selectedProjects.size === 0) {
+      showToast('info', t('projects.noSelectableProjects'), t('projects.noSelectableProjects'))
+      return
+    }
+    setBulkStarting(true)
+    let successCount = 0
+    let failCount = 0
+    try {
+      const ids = Array.from(selectedProjects)
+      for (const id of ids) {
+        const project = projects.find(p => p.id === id)
+        if (!project || project.status !== 'stopped') {
+          continue
+        }
+        const ok = await startProject(id)
+        if (ok) {
+          successCount += 1
+          setActiveProject(id)
+        } else {
+          failCount += 1
+        }
+      }
+      if (successCount === 0) {
+        showToast('info', t('projects.noSelectableProjects'), t('projects.noSelectableProjects'))
+      } else {
+        showToast(
+          failCount === 0 ? 'success' : 'info',
+          t('projects.bulkStartResult'),
+          t('projects.bulkStartDesc', { success: successCount, failed: failCount })
+        )
+      }
+    } catch (error) {
+      console.error('Error bulk starting projects:', error)
+      showToast('error', t('projects.bulkStartResult'), t('errors.unknownError'))
+    } finally {
+      setBulkStarting(false)
+      // 保留选中状态，不再自动清空
+    }
+  }
+
+  // 兜底：根据项目状态变化自动清理底栏的处理中的 loading 状态
+  // 场景：批量停止完成后，所有选中项都非 running，则关闭 bulkStopping；
+  //      批量启动完成后，选中项中已无 stopped 项，则关闭 bulkStarting。
+  useEffect(() => {
+    if (!bulkStarting && !bulkStopping) return
+    const selectedIds = Array.from(selectedProjects)
+    const noneRunningSelected = !projects.some(p => selectedIds.includes(p.id) && p.status === 'running')
+    const noneStoppedSelected = !projects.some(p => selectedIds.includes(p.id) && p.status === 'stopped')
+    if (bulkStopping && noneRunningSelected) {
+      setBulkStopping(false)
+    }
+    if (bulkStarting && noneStoppedSelected) {
+      setBulkStarting(false)
+    }
+  }, [projects, selectedProjects, bulkStarting, bulkStopping])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -143,7 +315,7 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 pb-20">
       {/* 页面标题和操作 */}
       <div className="flex items-center justify-between">
         <div>
@@ -242,6 +414,8 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      
+
       {/* 项目列表 */}
       {projects.length === 0 ? (
         <div className="bg-card border border-border rounded-lg p-12 text-center">
@@ -273,6 +447,21 @@ const Dashboard: React.FC = () => {
                       <h3 className="text-lg font-medium text-foreground">
                         {project.name}
                       </h3>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id={`select-${project.id}`}
+                          checked={isSelected(project.id)}
+                          onChange={() => toggleSelection(project.id)}
+                          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                        />
+                        <label 
+                          htmlFor={`select-${project.id}`}
+                          className="text-xs text-muted-foreground cursor-pointer"
+                        >
+                          {t('projects.selectProject')}
+                        </label>
+                      </div>
                     </div>
                     <p className="text-sm text-muted-foreground mb-1">
                       {t('projects.projectPath')}: {project.path}
@@ -343,6 +532,31 @@ const Dashboard: React.FC = () => {
         </div>
       )}
 
+      
+
+      {/* 固定底栏：一键启动 */}
+      <div className="fixed inset-x-0 bottom-0 z-40 bg-card border-t border-border shadow-lg">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-end">
+          <button
+            onClick={hasRunningSelected ? () => setBulkStopConfirmOpen(true) : startSelectedProjects}
+            disabled={isProcessing || selectedProjects.size === 0}
+            className={`flex items-center space-x-2 px-5 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${hasRunningSelected ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'}`}
+          >
+            {isProcessing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : hasRunningSelected ? (
+              <Square className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+            <span className="font-medium">{hasRunningSelected ? t('projects.stop') : t('projects.bulkStart')}</span>
+            {selectedProjects.size > 0 && (
+              <span className="text-xs opacity-80">({selectedProjects.size})</span>
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* 停止项目确认对话框 */}
       <ConfirmDialog
         isOpen={!!stopConfirm}
@@ -350,8 +564,20 @@ const Dashboard: React.FC = () => {
         message={t('projects.stopProjectConfirm')}
         confirmText={t('common.confirm')}
         cancelText={t('common.cancel')}
-        onConfirm={confirmStopProject}
+        onConfirm={() => { void confirmStopProject() }}
         onCancel={cancelStopProject}
+        confirmButtonClass="bg-red-600 hover:bg-red-700"
+      />
+
+      {/* 批量停止确认对话框 */}
+      <ConfirmDialog
+        isOpen={bulkStopConfirmOpen}
+        title={t('projects.bulkStopConfirmTitle', { defaultValue: '确认批量停止' })}
+        message={t('projects.bulkStopConfirmMessage', { count: runningSelectedCount, defaultValue: `确定要停止选中的正在运行项目吗？（${runningSelectedCount} 个）` })}
+        confirmText={t('common.confirm', { defaultValue: '确认' })}
+        cancelText={t('common.cancel', { defaultValue: '取消' })}
+        onConfirm={() => { setBulkStopConfirmOpen(false); stopSelectedProjects() }}
+        onCancel={() => setBulkStopConfirmOpen(false)}
         confirmButtonClass="bg-red-600 hover:bg-red-700"
       />
     </div>
