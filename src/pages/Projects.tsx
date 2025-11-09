@@ -230,17 +230,23 @@ const Projects: React.FC = () => {
   const confirmStopProject = async () => {
     console.log('[Projects] confirmStopProject called')
     if (stopConfirm) {
-      console.log('[Projects] Stopping project:', stopConfirm)
-      const success = await stopProject(stopConfirm)
-      console.log('[Projects] Stop project result:', success)
-      if (success) {
-        console.log('[Projects] Project stopped successfully, refreshing status and list')
-        // 先刷新该项目状态，再刷新全量，避免局部未更新导致按钮不切换
-        await refreshProjectStatus(stopConfirm)
-        await refreshAllProjects()
-        setStopConfirm(null)
-      } else {
-        console.error('[Projects] Failed to stop project, keeping modal open')
+      const id = stopConfirm
+      // 先关闭模态框，避免需要点击两次确认
+      setStopConfirm(null)
+      console.log('[Projects] Stopping project:', id)
+      try {
+        const success = await stopProject(id)
+        console.log('[Projects] Stop project result:', success)
+        if (success) {
+          console.log('[Projects] Project stopped successfully, refreshing status and list')
+          // 刷新该项目状态与全量列表，保证按钮及时切换
+          await refreshProjectStatus(id)
+          await refreshAllProjects()
+        } else {
+          console.error('[Projects] Failed to stop project')
+        }
+      } catch (e) {
+        console.error('[Projects] Error stopping project:', e)
       }
     }
   }
@@ -635,7 +641,7 @@ const Projects: React.FC = () => {
         message={t('projects.stopProjectMessage')}
         confirmText={t('projects.confirm')}
         cancelText={t('projects.cancel')}
-        onConfirm={confirmStopProject}
+        onConfirm={() => { void confirmStopProject() }}
         onCancel={cancelStopProject}
         confirmButtonClass="bg-red-600 hover:bg-red-700"
       />

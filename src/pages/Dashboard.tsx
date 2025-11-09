@@ -105,17 +105,23 @@ const Dashboard: React.FC = () => {
   const confirmStopProject = async () => {
     console.log('[Dashboard] confirmStopProject called')
     if (stopConfirm) {
-      console.log('[Dashboard] Stopping project:', stopConfirm)
-      const success = await stopProject(stopConfirm)
-      console.log('[Dashboard] Stop project result:', success)
-      if (success) {
-        console.log('[Dashboard] Project stopped successfully, refreshing status and list')
-        // 先刷新该项目状态，再刷新全量，避免局部未更新导致按钮不切换
-        await refreshProjectStatus(stopConfirm)
-        await refreshAllProjects()
-        setStopConfirm(null)
-      } else {
-        console.error('[Dashboard] Failed to stop project, keeping modal open')
+      const id = stopConfirm
+      // 先关闭模态框，避免需要点击两次确认
+      setStopConfirm(null)
+      console.log('[Dashboard] Stopping project:', id)
+      try {
+        const success = await stopProject(id)
+        console.log('[Dashboard] Stop project result:', success)
+        if (success) {
+          console.log('[Dashboard] Project stopped successfully, refreshing status and list')
+          // 刷新该项目状态与全量列表，保证按钮及时切换
+          await refreshProjectStatus(id)
+          await refreshAllProjects()
+        } else {
+          console.error('[Dashboard] Failed to stop project')
+        }
+      } catch (e) {
+        console.error('[Dashboard] Error stopping project:', e)
       }
     }
   }
