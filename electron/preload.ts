@@ -8,8 +8,10 @@ export interface ElectronAPI {
     create: (projectData: CreateProjectData) => Promise<Project>
     update: (id: string, updates: Partial<Project>) => Promise<Project>
     delete: (id: string) => Promise<boolean>
+    reorder: (projectIds: string[]) => Promise<boolean>
     getRunning: () => Promise<Project[]>
     start: (id: string) => Promise<{ success: boolean; pid?: number; error?: string }>
+    startBatch: (ids: string[]) => Promise<Array<{ id: string; name: string; success: boolean; pid?: number; error?: string }>>
     stop: (id: string) => Promise<boolean>
     getStatus: (id: string) => Promise<ProjectStatus>
     onStatusChange: (callback: (data: { id: string; status: ProjectStatus }) => void) => void
@@ -30,6 +32,16 @@ export interface ElectronAPI {
     get: () => Promise<AppConfig>
     update: (updates: Partial<AppConfig>) => Promise<AppConfig>
     reset: () => Promise<AppConfig>
+  }
+
+  shortcuts: {
+    getAll: () => Promise<ProjectShortcut[]>
+    create: (payload: { name: string; projectIds: string[] }) => Promise<ProjectShortcut>
+    delete: (id: string) => Promise<boolean>
+    rename: (payload: { id: string; name: string }) => Promise<ProjectShortcut>
+    reorder: (orderedIds: string[]) => Promise<ProjectShortcut[]>
+    export: () => Promise<string>
+    import: (rawJson: string) => Promise<{ success: boolean; imported: number; error?: string }>
   }
 
   // 系统对话框
@@ -87,9 +99,26 @@ export interface AppConfig {
   }
   language: 'zh-CN' | 'en-US'
   logLevel: 'info' | 'warn' | 'error'
+  projectOrder: string[]
 }
 
 export type ProjectStatus = 'stopped' | 'running' | 'error'
+
+export interface ShortcutProjectSnapshot {
+  id: string
+  name: string
+  path: string
+  packageManager: 'npm' | 'pnpm' | 'yarn'
+  startCommand: string
+}
+
+export interface ProjectShortcut {
+  id: string
+  name: string
+  projects: ShortcutProjectSnapshot[]
+  createdAt: string
+  updatedAt: string
+}
 
 // 暴露 API 到渲染进程
 const electronAPI: ElectronAPI = {
@@ -98,8 +127,10 @@ const electronAPI: ElectronAPI = {
     create: (projectData) => ipcRenderer.invoke('projects:create', projectData),
     update: (id, updates) => ipcRenderer.invoke('projects:update', id, updates),
     delete: (id) => ipcRenderer.invoke('projects:delete', id),
+    reorder: (projectIds) => ipcRenderer.invoke('projects:reorder', projectIds),
     getRunning: () => ipcRenderer.invoke('projects:getRunning'),
     start: (id) => ipcRenderer.invoke('projects:start', id),
+    startBatch: (ids) => ipcRenderer.invoke('projects:startBatch', ids),
     stop: (id) => ipcRenderer.invoke('projects:stop', id),
     getStatus: (id) => ipcRenderer.invoke('projects:getStatus', id),
     onStatusChange: (callback) => {
@@ -126,6 +157,16 @@ const electronAPI: ElectronAPI = {
     get: () => ipcRenderer.invoke('config:get'),
     update: (updates) => ipcRenderer.invoke('config:update', updates),
     reset: () => ipcRenderer.invoke('config:reset')
+  },
+
+  shortcuts: {
+    getAll: () => ipcRenderer.invoke('shortcuts:getAll'),
+    create: (payload) => ipcRenderer.invoke('shortcuts:create', payload),
+    delete: (id) => ipcRenderer.invoke('shortcuts:delete', id),
+    rename: (payload) => ipcRenderer.invoke('shortcuts:rename', payload),
+    reorder: (orderedIds) => ipcRenderer.invoke('shortcuts:reorder', orderedIds),
+    export: () => ipcRenderer.invoke('shortcuts:export'),
+    import: (rawJson) => ipcRenderer.invoke('shortcuts:import', rawJson)
   },
 
   dialog: {

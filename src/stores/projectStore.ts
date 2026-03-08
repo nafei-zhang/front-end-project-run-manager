@@ -32,6 +32,7 @@ interface ProjectStore {
   createProject: (data: CreateProjectData) => Promise<Project | null>
   updateProject: (id: string, updates: Partial<Project>) => Promise<Project | null>
   deleteProject: (id: string) => Promise<boolean>
+  reorderProjects: (projectIds: string[]) => Promise<boolean>
   startProject: (id: string) => Promise<boolean>
   stopProject: (id: string) => Promise<boolean>
   refreshProjectStatus: (id: string) => Promise<void>
@@ -229,6 +230,36 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       set({ error: errorMessage, loading: false })
     }
     return false
+  },
+
+  reorderProjects: async (projectIds: string[]) => {
+    try {
+      if (isElectron()) {
+        const success = await window.electronAPI.projects.reorder(projectIds)
+        if (!success) {
+          set({ error: 'Failed to reorder projects' })
+          return false
+        }
+      }
+
+      const { projects } = get()
+      const indexMap = new Map(projectIds.map((projectId, index) => [projectId, index]))
+      const sortedProjects = [...projects].sort((a, b) => {
+        const indexA = indexMap.get(a.id)
+        const indexB = indexMap.get(b.id)
+
+        if (indexA === undefined && indexB === undefined) return 0
+        if (indexA === undefined) return 1
+        if (indexB === undefined) return -1
+        return indexA - indexB
+      })
+      set({ projects: sortedProjects, error: null })
+      return true
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to reorder projects'
+      set({ error: errorMessage })
+      return false
+    }
   },
 
   startProject: async (id: string) => {

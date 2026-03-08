@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const child_process = require("child_process");
+const os = require("os");
 class ProjectManager {
   constructor() {
     __publicField(this, "projectsFilePath");
@@ -399,7 +400,7 @@ class ProcessManager {
     const { execSync } = require("child_process");
     const fs2 = require("fs");
     const path2 = require("path");
-    const os = require("os");
+    const os2 = require("os");
     const isWindows = process.platform === "win32";
     const commandWithExt = isWindows ? `${command}.cmd` : command;
     try {
@@ -417,23 +418,23 @@ class ProcessManager {
     if (isWindows) {
       const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
       const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-      const appData = process.env["APPDATA"] || path2.join(os.homedir(), "AppData", "Roaming");
-      const localAppData = process.env["LOCALAPPDATA"] || path2.join(os.homedir(), "AppData", "Local");
+      const appData = process.env["APPDATA"] || path2.join(os2.homedir(), "AppData", "Roaming");
+      const localAppData = process.env["LOCALAPPDATA"] || path2.join(os2.homedir(), "AppData", "Local");
       commonPaths.push(
         path2.join(programFiles, "nodejs", `${command}.cmd`),
         path2.join(programFilesX86, "nodejs", `${command}.cmd`),
         path2.join(appData, "npm", `${command}.cmd`),
         path2.join(localAppData, "npm", `${command}.cmd`),
-        path2.join(os.homedir(), "AppData", "Roaming", "npm", `${command}.cmd`)
+        path2.join(os2.homedir(), "AppData", "Roaming", "npm", `${command}.cmd`)
       );
       const nvmPath = process.env["NVM_HOME"];
       if (nvmPath) {
         commonPaths.push(path2.join(nvmPath, `${command}.cmd`));
       }
-      const voltaHome = process.env["VOLTA_HOME"] || path2.join(os.homedir(), ".volta");
+      const voltaHome = process.env["VOLTA_HOME"] || path2.join(os2.homedir(), ".volta");
       commonPaths.push(path2.join(voltaHome, "bin", `${command}.cmd`));
     } else {
-      const homeDir = process.env.HOME || os.homedir();
+      const homeDir = process.env.HOME || os2.homedir();
       commonPaths.push(
         `/usr/local/bin/${command}`,
         `/opt/homebrew/bin/${command}`,
@@ -569,27 +570,27 @@ class ProcessManager {
     const currentPath = process.env.PATH || "";
     const fs2 = require("fs");
     const path2 = require("path");
-    const os = require("os");
+    const os2 = require("os");
     const isWindows = process.platform === "win32";
     const pathSeparator = isWindows ? ";" : ":";
     const additionalPaths = [];
     if (isWindows) {
       const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
       const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-      const appData = process.env["APPDATA"] || path2.join(os.homedir(), "AppData", "Roaming");
-      const localAppData = process.env["LOCALAPPDATA"] || path2.join(os.homedir(), "AppData", "Local");
+      const appData = process.env["APPDATA"] || path2.join(os2.homedir(), "AppData", "Roaming");
+      const localAppData = process.env["LOCALAPPDATA"] || path2.join(os2.homedir(), "AppData", "Local");
       additionalPaths.push(
         path2.join(programFiles, "nodejs"),
         path2.join(programFilesX86, "nodejs"),
         path2.join(appData, "npm"),
         path2.join(localAppData, "npm"),
-        path2.join(os.homedir(), "AppData", "Roaming", "npm")
+        path2.join(os2.homedir(), "AppData", "Roaming", "npm")
       );
       const nvmPath = process.env["NVM_HOME"];
       if (nvmPath) {
         additionalPaths.push(nvmPath);
       }
-      const voltaHome = process.env["VOLTA_HOME"] || path2.join(os.homedir(), ".volta");
+      const voltaHome = process.env["VOLTA_HOME"] || path2.join(os2.homedir(), ".volta");
       additionalPaths.push(path2.join(voltaHome, "bin"));
     } else {
       additionalPaths.push(
@@ -598,7 +599,7 @@ class ProcessManager {
         "/usr/bin",
         "/bin"
       );
-      const homeDir = process.env.HOME || os.homedir();
+      const homeDir = process.env.HOME || os2.homedir();
       if (homeDir) {
         try {
           const nvmDir = path2.join(homeDir, ".nvm", "versions", "node");
@@ -748,7 +749,8 @@ const DEFAULT_CONFIG = {
   defaultPackageManager: "npm",
   maxConcurrentProjects: 5,
   language: "en-US",
-  logLevel: "info"
+  logLevel: "info",
+  projectOrder: []
 };
 class ConfigManager {
   constructor() {
@@ -867,12 +869,351 @@ class ConfigManager {
     }
   }
 }
+const _ShortcutConfigManager = class _ShortcutConfigManager {
+  constructor() {
+    __publicField(this, "configDir");
+    __publicField(this, "backupDir");
+    __publicField(this, "configFilePath");
+    __publicField(this, "startupLogPath");
+    __publicField(this, "secretKey");
+    this.configDir = this.resolveConfigDir();
+    this.backupDir = path.join(this.configDir, "backups");
+    this.configFilePath = path.join(this.configDir, "config.json");
+    this.startupLogPath = path.join(this.configDir, "startup.log");
+    this.secretKey = crypto.createHash("sha256").update(path.join(this.configDir, "front-end-project-run-manager-key")).digest();
+    this.ensureDirectories();
+    this.ensureConfig();
+  }
+  getShortcuts() {
+    const payload = this.readPayloadWithRecovery();
+    return payload.shortcuts;
+  }
+  createShortcut(name, projects) {
+    const sanitizedName = this.validateAndSanitizeName(name);
+    if (projects.length === 0) {
+      throw new Error("No projects selected");
+    }
+    const shortcuts = this.getShortcuts();
+    const duplicated = shortcuts.some((item) => item.name.toLowerCase() === sanitizedName.toLowerCase());
+    if (duplicated) {
+      throw new Error("Shortcut name already exists");
+    }
+    if (shortcuts.length >= _ShortcutConfigManager.MAX_SHORTCUTS) {
+      throw new Error(`Maximum ${_ShortcutConfigManager.MAX_SHORTCUTS} shortcuts allowed`);
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const shortcut = {
+      id: crypto.randomBytes(8).toString("hex"),
+      name: sanitizedName,
+      projects: projects.map((project) => ({ ...project })),
+      createdAt: now,
+      updatedAt: now
+    };
+    this.writePayload({ shortcuts: [...shortcuts, shortcut] });
+    return shortcut;
+  }
+  deleteShortcut(shortcutId) {
+    const shortcuts = this.getShortcuts();
+    const next = shortcuts.filter((item) => item.id !== shortcutId);
+    if (next.length === shortcuts.length) {
+      return false;
+    }
+    this.writePayload({ shortcuts: next });
+    return true;
+  }
+  updateShortcutName(shortcutId, name) {
+    const sanitizedName = this.validateAndSanitizeName(name);
+    const shortcuts = this.getShortcuts();
+    const target = shortcuts.find((item) => item.id === shortcutId);
+    if (!target) {
+      throw new Error("Shortcut not found");
+    }
+    const duplicated = shortcuts.some(
+      (item) => item.id !== shortcutId && item.name.toLowerCase() === sanitizedName.toLowerCase()
+    );
+    if (duplicated) {
+      throw new Error("Shortcut name already exists");
+    }
+    const updatedShortcut = {
+      ...target,
+      name: sanitizedName,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const next = shortcuts.map((item) => item.id === shortcutId ? updatedShortcut : item);
+    this.writePayload({ shortcuts: next });
+    return updatedShortcut;
+  }
+  reorderShortcuts(orderedIds) {
+    const shortcuts = this.getShortcuts();
+    const map = new Map(shortcuts.map((item) => [item.id, item]));
+    const deduped = Array.from(new Set(orderedIds)).filter((id) => map.has(id));
+    const missing = shortcuts.map((item) => item.id).filter((id) => !deduped.includes(id));
+    const finalOrder = [...deduped, ...missing];
+    const next = finalOrder.map((id) => map.get(id)).filter(Boolean);
+    this.writePayload({ shortcuts: next });
+    return next;
+  }
+  exportShortcuts() {
+    const data = {
+      version: _ShortcutConfigManager.VERSION,
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      shortcuts: this.getShortcuts()
+    };
+    return JSON.stringify(data, null, 2);
+  }
+  importShortcuts(rawJson) {
+    try {
+      const parsed = JSON.parse(rawJson);
+      const sourceShortcuts = Array.isArray(parsed == null ? void 0 : parsed.shortcuts) ? parsed.shortcuts : [];
+      const validShortcuts = sourceShortcuts.map((item) => this.normalizeShortcut(item)).filter(Boolean);
+      if (validShortcuts.length === 0) {
+        return { success: false, imported: 0, error: "No valid shortcuts found" };
+      }
+      const dedupedByName = /* @__PURE__ */ new Map();
+      validShortcuts.forEach((item) => {
+        const key = item.name.toLowerCase();
+        if (!dedupedByName.has(key)) {
+          dedupedByName.set(key, item);
+        }
+      });
+      const merged = Array.from(dedupedByName.values()).slice(0, _ShortcutConfigManager.MAX_SHORTCUTS);
+      this.writePayload({ shortcuts: merged });
+      return { success: true, imported: merged.length };
+    } catch (error) {
+      return {
+        success: false,
+        imported: 0,
+        error: error instanceof Error ? error.message : "Import failed"
+      };
+    }
+  }
+  appendStartupLogs(logs) {
+    const lines = logs.map((log) => {
+      return `${(/* @__PURE__ */ new Date()).toISOString()} [${log.success ? "SUCCESS" : "FAILED"}] ${log.projectName}(${log.projectId}) ${log.message}`;
+    });
+    try {
+      fs.appendFileSync(this.startupLogPath, `${lines.join("\n")}
+`);
+    } catch (error) {
+      console.error("[ShortcutConfigManager] Failed to append startup logs:", error);
+    }
+  }
+  resolveConfigDir() {
+    const candidates = [
+      path.join(os.homedir(), ".config", "front-end-project-run-manager"),
+      path.join(electron.app.getPath("userData"), "shortcut-config"),
+      path.join(process.cwd(), ".runtime-config")
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (!fs.existsSync(candidate)) {
+          fs.mkdirSync(candidate, { recursive: true });
+        }
+        return candidate;
+      } catch (error) {
+        continue;
+      }
+    }
+    throw new Error("No writable config directory available");
+  }
+  ensureDirectories() {
+    if (!fs.existsSync(this.configDir)) {
+      fs.mkdirSync(this.configDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.backupDir)) {
+      fs.mkdirSync(this.backupDir, { recursive: true });
+    }
+  }
+  ensureConfig() {
+    if (!fs.existsSync(this.configFilePath)) {
+      this.writePayload({ shortcuts: [] }, false);
+      return;
+    }
+    this.readPayloadWithRecovery();
+  }
+  readPayloadWithRecovery() {
+    try {
+      return this.readPayload();
+    } catch (error) {
+      const restored = this.restoreLatestBackup();
+      if (!restored) {
+        this.writePayload({ shortcuts: [] }, false);
+        return { shortcuts: [] };
+      }
+      try {
+        return this.readPayload();
+      } catch (retryError) {
+        this.writePayload({ shortcuts: [] }, false);
+        return { shortcuts: [] };
+      }
+    }
+  }
+  readPayload() {
+    const raw = fs.readFileSync(this.configFilePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const migrated = this.migrateIfNeeded(parsed);
+    if (migrated) {
+      return migrated;
+    }
+    const encrypted = parsed;
+    if (!encrypted.encrypted || !encrypted.payload || !encrypted.iv) {
+      throw new Error("Invalid encrypted config");
+    }
+    const currentChecksum = crypto.createHash("sha256").update(`${encrypted.version}|${encrypted.iv}|${encrypted.payload}`).digest("hex");
+    if (currentChecksum !== encrypted.checksum) {
+      throw new Error("Config checksum mismatch");
+    }
+    const ivBuffer = Buffer.from(encrypted.iv, "hex");
+    const encryptedBuffer = Buffer.from(encrypted.payload, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-cbc", this.secretKey, ivBuffer);
+    const decrypted = Buffer.concat([decipher.update(encryptedBuffer), decipher.final()]).toString("utf-8");
+    const payload = JSON.parse(decrypted);
+    return {
+      shortcuts: this.normalizeShortcuts(payload.shortcuts || [])
+    };
+  }
+  migrateIfNeeded(parsed) {
+    if (parsed.encrypted) {
+      return null;
+    }
+    const legacy = parsed;
+    const shortcuts = this.normalizeShortcuts(legacy.shortcuts || []);
+    const payload = { shortcuts };
+    this.writePayload(payload);
+    return payload;
+  }
+  writePayload(payload, backupCurrent = true) {
+    const normalized = {
+      shortcuts: this.normalizeShortcuts(payload.shortcuts || []).slice(0, _ShortcutConfigManager.MAX_SHORTCUTS)
+    };
+    if (backupCurrent && fs.existsSync(this.configFilePath)) {
+      this.createBackup();
+    }
+    const ivBuffer = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv("aes-256-cbc", this.secretKey, ivBuffer);
+    const plainText = JSON.stringify(normalized);
+    const encryptedBuffer = Buffer.concat([cipher.update(plainText, "utf-8"), cipher.final()]);
+    const encryptedPayload = encryptedBuffer.toString("base64");
+    const iv = ivBuffer.toString("hex");
+    const checksum = crypto.createHash("sha256").update(`${_ShortcutConfigManager.VERSION}|${iv}|${encryptedPayload}`).digest("hex");
+    const output = {
+      version: _ShortcutConfigManager.VERSION,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      encrypted: true,
+      payload: encryptedPayload,
+      iv,
+      checksum
+    };
+    fs.writeFileSync(this.configFilePath, JSON.stringify(output, null, 2));
+    this.trimBackups();
+  }
+  createBackup() {
+    const backupName = `config-${Date.now()}.json`;
+    const backupPath = path.join(this.backupDir, backupName);
+    fs.copyFileSync(this.configFilePath, backupPath);
+  }
+  trimBackups() {
+    if (!fs.existsSync(this.backupDir)) {
+      return;
+    }
+    const backups = fs.readdirSync(this.backupDir).map((file) => {
+      const filePath = path.join(this.backupDir, file);
+      return { file, filePath, mtime: fs.statSync(filePath).mtimeMs };
+    }).sort((a, b) => b.mtime - a.mtime);
+    backups.slice(_ShortcutConfigManager.MAX_BACKUPS).forEach((item) => {
+      fs.rmSync(item.filePath, { force: true });
+    });
+  }
+  restoreLatestBackup() {
+    if (!fs.existsSync(this.backupDir)) {
+      return false;
+    }
+    const backups = fs.readdirSync(this.backupDir).map((file) => {
+      const filePath = path.join(this.backupDir, file);
+      return { filePath, mtime: fs.statSync(filePath).mtimeMs };
+    }).sort((a, b) => b.mtime - a.mtime);
+    for (const backup of backups) {
+      try {
+        const content = fs.readFileSync(backup.filePath, "utf-8");
+        JSON.parse(content);
+        fs.writeFileSync(this.configFilePath, content);
+        return true;
+      } catch (error) {
+        fs.unlinkSync(backup.filePath);
+      }
+    }
+    return false;
+  }
+  normalizeShortcuts(shortcuts) {
+    return shortcuts.map((item) => this.normalizeShortcut(item)).filter(Boolean);
+  }
+  normalizeShortcut(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const name = this.validateAndSanitizeName(item.name);
+    const projects = Array.isArray(item.projects) ? item.projects : [];
+    const normalizedProjects = projects.filter((project) => project && project.id && project.name && project.path && project.startCommand).map((project) => ({
+      id: String(project.id),
+      name: String(project.name),
+      path: String(project.path),
+      packageManager: ["npm", "pnpm", "yarn"].includes(project.packageManager) ? project.packageManager : "npm",
+      startCommand: String(project.startCommand)
+    }));
+    if (normalizedProjects.length === 0) {
+      return null;
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    return {
+      id: item.id ? String(item.id) : crypto.randomBytes(8).toString("hex"),
+      name,
+      projects: normalizedProjects,
+      createdAt: item.createdAt ? String(item.createdAt) : now,
+      updatedAt: item.updatedAt ? String(item.updatedAt) : now
+    };
+  }
+  validateAndSanitizeName(name) {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) {
+      throw new Error("Shortcut name is required");
+    }
+    if (trimmed.length > 20) {
+      throw new Error("Shortcut name must be 20 characters or less");
+    }
+    if (!/^[a-zA-Z0-9_\-\u4e00-\u9fa5\s]+$/.test(trimmed)) {
+      throw new Error("Shortcut name contains invalid characters");
+    }
+    return trimmed;
+  }
+};
+__publicField(_ShortcutConfigManager, "VERSION", 2);
+__publicField(_ShortcutConfigManager, "MAX_SHORTCUTS", 5);
+__publicField(_ShortcutConfigManager, "MAX_BACKUPS", 5);
+let ShortcutConfigManager = _ShortcutConfigManager;
 let projectManager;
 let processManager;
 let logManager;
 let configManager;
+let shortcutConfigManager;
 let mainWindow = null;
 const isDev = process.env.NODE_ENV === "development";
+function applyProjectOrder(items, order) {
+  if (order.length === 0) {
+    return items;
+  }
+  const indexMap = new Map(order.map((id, index) => [id, index]));
+  return [...items].sort((a, b) => {
+    const indexA = indexMap.get(a.id);
+    const indexB = indexMap.get(b.id);
+    if (indexA === void 0 && indexB === void 0)
+      return 0;
+    if (indexA === void 0)
+      return 1;
+    if (indexB === void 0)
+      return -1;
+    return indexA - indexB;
+  });
+}
 function createWindow() {
   var _a, _b, _c, _d;
   const config = configManager ? configManager.getConfig() : null;
@@ -914,6 +1255,7 @@ function createWindow() {
 }
 function initializeServices() {
   configManager = new ConfigManager();
+  shortcutConfigManager = new ShortcutConfigManager();
   projectManager = new ProjectManager();
   logManager = new LogManager();
   processManager = new ProcessManager(logManager);
@@ -945,10 +1287,37 @@ function initializeServices() {
   projectManager.resetAllProjectsToStopped();
 }
 function setupIpcHandlers() {
-  electron.ipcMain.handle("projects:getAll", () => projectManager.getAllProjects());
-  electron.ipcMain.handle("projects:create", (_, projectData) => projectManager.createProject(projectData));
+  electron.ipcMain.handle("projects:getAll", () => {
+    const projects = projectManager.getAllProjects();
+    const { projectOrder } = configManager.getConfig();
+    return applyProjectOrder(projects, projectOrder || []);
+  });
+  electron.ipcMain.handle("projects:create", (_, projectData) => {
+    const project = projectManager.createProject(projectData);
+    const { projectOrder } = configManager.getConfig();
+    const nextOrder = [...(projectOrder || []).filter((id) => id !== project.id), project.id];
+    configManager.updateConfig({ projectOrder: nextOrder });
+    return project;
+  });
   electron.ipcMain.handle("projects:update", (_, id, updates) => projectManager.updateProject(id, updates));
-  electron.ipcMain.handle("projects:delete", (_, id) => projectManager.deleteProject(id));
+  electron.ipcMain.handle("projects:delete", (_, id) => {
+    const success = projectManager.deleteProject(id);
+    if (success) {
+      const { projectOrder } = configManager.getConfig();
+      const nextOrder = (projectOrder || []).filter((projectId) => projectId !== id);
+      configManager.updateConfig({ projectOrder: nextOrder });
+    }
+    return success;
+  });
+  electron.ipcMain.handle("projects:reorder", (_, projectIds) => {
+    const projects = projectManager.getAllProjects();
+    const projectSet = new Set(projects.map((project) => project.id));
+    const dedupedIds = Array.from(new Set(projectIds)).filter((id) => projectSet.has(id));
+    const missingIds = projects.map((project) => project.id).filter((id) => !dedupedIds.includes(id));
+    const normalizedOrder = [...dedupedIds, ...missingIds];
+    configManager.updateConfig({ projectOrder: normalizedOrder });
+    return true;
+  });
   electron.ipcMain.handle("projects:getRunning", () => processManager.getRunningProjects());
   electron.ipcMain.handle("projects:start", async (_, id) => {
     const project = projectManager.getProject(id);
@@ -961,7 +1330,45 @@ function setupIpcHandlers() {
         pid: result.pid
       });
     }
+    shortcutConfigManager.appendStartupLogs([{
+      projectId: id,
+      projectName: project.name,
+      success: result.success,
+      message: result.success ? `Started with PID ${result.pid || "N/A"}` : result.error || "Unknown error"
+    }]);
     return result;
+  });
+  electron.ipcMain.handle("projects:startBatch", async (_, ids) => {
+    const uniqueIds = Array.from(new Set(ids));
+    const started = await Promise.all(uniqueIds.map(async (id) => {
+      const project = projectManager.getProject(id);
+      if (!project) {
+        return { id, name: id, success: false, error: "Project not found" };
+      }
+      const result = await processManager.startProject(project);
+      if (result.success) {
+        projectManager.updateProject(id, {
+          status: "running",
+          pid: result.pid
+        });
+      }
+      return {
+        id,
+        name: project.name,
+        success: result.success,
+        pid: result.pid,
+        error: result.error
+      };
+    }));
+    shortcutConfigManager.appendStartupLogs(
+      started.map((item) => ({
+        projectId: item.id,
+        projectName: item.name,
+        success: item.success,
+        message: item.success ? `Started with PID ${item.pid || "N/A"}` : item.error || "Unknown error"
+      }))
+    );
+    return started;
   });
   electron.ipcMain.handle("projects:stop", async (_, id) => {
     console.log("[IPC] projects:stop called for id:", id);
@@ -997,6 +1404,28 @@ function setupIpcHandlers() {
   electron.ipcMain.handle("config:get", () => configManager.getConfig());
   electron.ipcMain.handle("config:update", (_, updates) => configManager.updateConfig(updates));
   electron.ipcMain.handle("config:reset", () => configManager.resetConfig());
+  electron.ipcMain.handle("shortcuts:getAll", () => shortcutConfigManager.getShortcuts());
+  electron.ipcMain.handle("shortcuts:create", (_, payload) => {
+    const { name, projectIds } = payload;
+    const uniqueIds = Array.from(new Set(projectIds));
+    const allProjects = projectManager.getAllProjects();
+    const projectMap = new Map(allProjects.map((project) => [project.id, project]));
+    const selectedProjects = uniqueIds.map((id) => projectMap.get(id)).filter(Boolean).map((project) => ({
+      id: project.id,
+      name: project.name,
+      path: project.path,
+      packageManager: project.packageManager,
+      startCommand: project.startCommand
+    }));
+    return shortcutConfigManager.createShortcut(name, selectedProjects);
+  });
+  electron.ipcMain.handle("shortcuts:delete", (_, id) => shortcutConfigManager.deleteShortcut(id));
+  electron.ipcMain.handle("shortcuts:rename", (_, payload) => {
+    return shortcutConfigManager.updateShortcutName(payload.id, payload.name);
+  });
+  electron.ipcMain.handle("shortcuts:reorder", (_, orderedIds) => shortcutConfigManager.reorderShortcuts(orderedIds));
+  electron.ipcMain.handle("shortcuts:export", () => shortcutConfigManager.exportShortcuts());
+  electron.ipcMain.handle("shortcuts:import", (_, rawJson) => shortcutConfigManager.importShortcuts(rawJson));
   electron.ipcMain.handle("dialog:selectFolder", async () => {
     if (!mainWindow)
       return null;

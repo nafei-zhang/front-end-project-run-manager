@@ -17,6 +17,7 @@ export interface AppConfig {
   }
   language: 'zh-CN' | 'en-US'
   logLevel: 'info' | 'warn' | 'error'
+  projectOrder: string[]
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -27,7 +28,8 @@ const DEFAULT_CONFIG: AppConfig = {
   defaultPackageManager: 'npm',
   maxConcurrentProjects: 5,
   language: 'en-US',
-  logLevel: 'info'
+  logLevel: 'info',
+  projectOrder: []
 }
 
 export class ConfigManager {
