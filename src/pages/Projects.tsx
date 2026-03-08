@@ -40,6 +40,7 @@ interface ProjectShortcut {
 }
 
 const Projects: React.FC = () => {
+  const SHORTCUT_SINGLE_CLICK_DELAY = 320
   const { showToast } = useToast()
   const { t } = useTranslation()
   const { 
@@ -778,10 +779,14 @@ const Projects: React.FC = () => {
                   clearTimeout(shortcutClickTimerRef.current)
                   shortcutClickTimerRef.current = null
                 }
+                if (event.detail > 1) {
+                  return
+                }
+                const shiftKeyPressed = event.shiftKey
                 shortcutClickTimerRef.current = setTimeout(() => {
                   shortcutClickTimerRef.current = null
-                  void handleApplyShortcut(shortcut, event.shiftKey)
-                }, 220)
+                  void handleApplyShortcut(shortcut, shiftKeyPressed)
+                }, SHORTCUT_SINGLE_CLICK_DELAY)
               }}
               onDoubleClick={(event) => {
                 event.preventDefault()
@@ -914,8 +919,8 @@ const Projects: React.FC = () => {
               />
               {/* 项目头部 */}
               <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2 mb-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2 mb-2 min-w-0">
                     <input
                       type="checkbox"
                       checked={selectedProjectIds.includes(project.id)}
@@ -930,7 +935,7 @@ const Projects: React.FC = () => {
                       } ${draggingProjectId === project.id ? 'text-primary scale-110' : ''}`}
                     />
                     {getStatusIcon(project.status)}
-                    <h3 className="text-base font-semibold text-foreground truncate">
+                    <h3 className="flex-1 min-w-0 text-base font-semibold text-foreground truncate">
                       {project.name}
                     </h3>
                   </div>
@@ -943,7 +948,7 @@ const Projects: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center space-x-1">
+                <div className="flex items-center space-x-1 shrink-0 ml-2">
                   <button
                     onClick={() => handleEditProject(project)}
                     className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
@@ -975,7 +980,7 @@ const Projects: React.FC = () => {
                 </div>
                 <div className="text-xs text-muted-foreground">
                   <span className="font-medium">{t('projects.command')}</span>
-                  <p className="mt-0.5">
+                  <p className="mt-0.5 truncate" title={project.startCommand}>
                     {project.startCommand}
                   </p>
                 </div>
@@ -991,7 +996,8 @@ const Projects: React.FC = () => {
                       href={project.url} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="text-blue-500 hover:text-blue-600 underline ml-1"
+                      className="inline-block max-w-full truncate align-bottom text-blue-500 hover:text-blue-600 underline ml-1"
+                      title={project.url}
                     >
                       {project.url}
                     </a>
