@@ -542,7 +542,7 @@ const Dashboard: React.FC = () => {
 
       {/* 固定底栏：一键启动 */}
       <div className="fixed inset-x-0 bottom-0 z-40 bg-card border-t border-border shadow-lg">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-end">
+        <div className="w-full px-6 py-3 flex items-center justify-end">
           <button
             onClick={hasRunningSelected ? () => setBulkStopConfirmOpen(true) : startSelectedProjects}
             disabled={isProcessing || selectedProjects.size === 0}
