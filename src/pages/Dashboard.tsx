@@ -146,7 +146,7 @@ const Dashboard: React.FC = () => {
       })
       if (stoppable.length === 0) {
         await refreshAllProjects()
-        showToast('info', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('projects.noRunningSelected', { defaultValue: '没有正在运行的选中项目' }))
+        showToast('info', t('projects.bulkStopResult'), t('projects.noRunningSelected'))
         setBulkStopping(false)
         return
       }
@@ -168,17 +168,17 @@ const Dashboard: React.FC = () => {
         refreshAllProjects()
       }, 600)
       if (successCount === 0) {
-        showToast('info', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('projects.noRunningSelected', { defaultValue: '没有正在运行的选中项目' }))
+        showToast('info', t('projects.bulkStopResult'), t('projects.noRunningSelected'))
       } else {
         showToast(
           failCount === 0 ? 'success' : 'info',
-          t('projects.bulkStopResult', { defaultValue: '批量停止结果' }),
-          t('projects.bulkStopDesc', { success: successCount, failed: failCount, defaultValue: '成功停止 {{success}} 个，失败 {{failed}} 个' })
+          t('projects.bulkStopResult'),
+          t('projects.bulkStopDesc', { success: successCount, failed: failCount })
         )
       }
     } catch (error) {
       console.error('Error bulk stopping projects:', error)
-      showToast('error', t('projects.bulkStopResult', { defaultValue: '批量停止结果' }), t('errors.unknownError'))
+      showToast('error', t('projects.bulkStopResult'), t('errors.unknownError'))
     } finally {
       // 兜底关闭所有处理中的 loading 状态，避免底栏一直转圈
       setBulkStopping(false)
@@ -578,10 +578,10 @@ const Dashboard: React.FC = () => {
       {/* 批量停止确认对话框 */}
       <ConfirmDialog
         isOpen={bulkStopConfirmOpen}
-        title={t('projects.bulkStopConfirmTitle', { defaultValue: '确认批量停止' })}
-        message={t('projects.bulkStopConfirmMessage', { count: runningSelectedCount, defaultValue: `确定要停止选中的正在运行项目吗？（${runningSelectedCount} 个）` })}
-        confirmText={t('common.confirm', { defaultValue: '确认' })}
-        cancelText={t('common.cancel', { defaultValue: '取消' })}
+        title={t('projects.bulkStopConfirmTitle')}
+        message={t('projects.bulkStopConfirmMessage', { count: runningSelectedCount })}
+        confirmText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         onConfirm={() => { setBulkStopConfirmOpen(false); stopSelectedProjects() }}
         onCancel={() => setBulkStopConfirmOpen(false)}
         confirmButtonClass="bg-red-600 hover:bg-red-700"

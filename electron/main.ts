@@ -95,10 +95,17 @@ function initializeServices() {
   // 设置 URL 检测回调
   processManager.setUrlDetectedCallback((projectId: string, url: string, port?: number) => {
     console.log(`[Main] URL detected for project ${projectId}: ${url}`)
-    projectManager.updateProject(projectId, { 
+    const updatedProject = projectManager.updateProject(projectId, {
       url: url,
       port: port 
     })
+    if (mainWindow && updatedProject) {
+      try {
+        mainWindow.webContents.send('projects:projectUpdated', updatedProject)
+      } catch (err) {
+        console.warn('[Main] Failed to send projects:projectUpdated:', err)
+      }
+    }
   })
   
   // 设置项目状态变更回调
@@ -277,7 +284,8 @@ function setupIpcHandlers() {
         name: project!.name,
         path: project!.path,
         packageManager: project!.packageManager,
-        startCommand: project!.startCommand
+        startCommand: project!.startCommand,
+        autoRefreshLogs: !!project!.autoRefreshLogs
       }))
     return shortcutConfigManager.createShortcut(name, selectedProjects)
   })

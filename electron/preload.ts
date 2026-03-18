@@ -15,7 +15,9 @@ export interface ElectronAPI {
     stop: (id: string) => Promise<boolean>
     getStatus: (id: string) => Promise<ProjectStatus>
     onStatusChange: (callback: (data: { id: string; status: ProjectStatus }) => void) => void
+    onProjectUpdated: (callback: (project: Project) => void) => void
     removeStatusChangeListeners: () => void
+    removeProjectUpdatedListeners: () => void
   }
 
   // 日志管理
@@ -110,6 +112,7 @@ export interface ShortcutProjectSnapshot {
   path: string
   packageManager: 'npm' | 'pnpm' | 'yarn'
   startCommand: string
+  autoRefreshLogs?: boolean
 }
 
 export interface ProjectShortcut {
@@ -136,8 +139,14 @@ const electronAPI: ElectronAPI = {
     onStatusChange: (callback) => {
       ipcRenderer.on('projects:statusChanged', (_, data) => callback(data))
     },
+    onProjectUpdated: (callback) => {
+      ipcRenderer.on('projects:projectUpdated', (_, project) => callback(project))
+    },
     removeStatusChangeListeners: () => {
       ipcRenderer.removeAllListeners('projects:statusChanged')
+    },
+    removeProjectUpdatedListeners: () => {
+      ipcRenderer.removeAllListeners('projects:projectUpdated')
     }
   },
 

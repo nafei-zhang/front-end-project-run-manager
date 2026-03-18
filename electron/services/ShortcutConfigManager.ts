@@ -10,6 +10,7 @@ export interface ShortcutProjectSnapshot {
   path: string
   packageManager: 'npm' | 'pnpm' | 'yarn'
   startCommand: string
+  autoRefreshLogs?: boolean
 }
 
 export interface ProjectShortcut {
@@ -386,7 +387,8 @@ export class ShortcutConfigManager {
         name: String(project.name),
         path: String(project.path),
         packageManager: ['npm', 'pnpm', 'yarn'].includes(project.packageManager) ? project.packageManager : 'npm',
-        startCommand: String(project.startCommand)
+        startCommand: String(project.startCommand),
+        autoRefreshLogs: typeof project.autoRefreshLogs === 'boolean' ? project.autoRefreshLogs : undefined
       })) as ShortcutProjectSnapshot[]
 
     if (normalizedProjects.length === 0) {

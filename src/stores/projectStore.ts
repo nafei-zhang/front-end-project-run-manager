@@ -47,6 +47,7 @@ const isElectron = () => {
 
 // 是否已订阅 Electron 主动状态变更事件（避免重复订阅）
 let statusSubscribed = false
+let projectUpdatedSubscribed = false
 
 // 模拟项目数据（用于浏览器环境测试）
 const mockProjects: Project[] = [
@@ -106,6 +107,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
             console.log('[ProjectStore] Subscribed to projects:statusChanged')
           } catch (err) {
             console.warn('[ProjectStore] Failed to subscribe to projects:statusChanged:', err)
+          }
+        }
+        if (!projectUpdatedSubscribed) {
+          try {
+            window.electronAPI.projects.onProjectUpdated((project) => {
+              set(state => ({
+                projects: state.projects.map(p => p.id === project.id ? project : p)
+              }))
+            })
+            projectUpdatedSubscribed = true
+            console.log('[ProjectStore] Subscribed to projects:projectUpdated')
+          } catch (err) {
+            console.warn('[ProjectStore] Failed to subscribe to projects:projectUpdated:', err)
           }
         }
       } else {

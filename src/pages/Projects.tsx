@@ -34,6 +34,7 @@ interface ProjectShortcut {
     path: string
     packageManager: 'npm' | 'pnpm' | 'yarn'
     startCommand: string
+    autoRefreshLogs?: boolean
   }>
   createdAt: string
   updatedAt: string
@@ -77,10 +78,13 @@ const Projects: React.FC = () => {
   const [editingShortcutName, setEditingShortcutName] = useState('')
   const [renamingShortcutId, setRenamingShortcutId] = useState<string | null>(null)
   const [batchStarting, setBatchStarting] = useState(false)
+  const [batchStopping, setBatchStopping] = useState(false)
   const [batchProgress, setBatchProgress] = useState({ total: 0, done: 0, success: 0, failed: 0 })
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const shortcutClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const batchStopToastSentRef = useRef(false)
+  const selectionStorageKey = 'selectedProjectIds'
 
   const selectedCount = selectedProjectIds.length
   const projectMap = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects])
@@ -122,9 +126,50 @@ const Projects: React.FC = () => {
   }, [loadProjects])
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(selectionStorageKey)
+      if (!raw) {
+        return
+      }
+      const ids = JSON.parse(raw)
+      if (Array.isArray(ids)) {
+        setSelectedProjectIds(ids.filter((id): id is string => typeof id === 'string'))
+      }
+    } catch (error) {
+      console.warn('[Projects] Failed to load selected projects from storage:', error)
+    }
+  }, [])
+
+  useEffect(() => {
     const availableIds = new Set(projects.map(project => project.id))
     setSelectedProjectIds(prev => prev.filter(id => availableIds.has(id)))
   }, [projects])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(selectionStorageKey, JSON.stringify(selectedProjectIds))
+    } catch (error) {
+      console.warn('[Projects] Failed to persist selected projects to storage:', error)
+    }
+  }, [selectedProjectIds])
+
+  useEffect(() => {
+    if (!batchStopping) {
+      return
+    }
+    const hasRunningInSelection = selectedProjectIds.some(projectId => {
+      const project = projects.find(item => item.id === projectId)
+      return project?.status === 'running'
+    })
+    if (!hasRunningInSelection) {
+      if (!batchStopToastSentRef.current) {
+        batchStopToastSentRef.current = true
+        showToast('success', t('projects.bulkStopResult'), t('projects.shortcuts.batchStopDoneDesc'))
+      }
+      setBatchStopping(false)
+      setBatchProgress({ total: 0, done: 0, success: 0, failed: 0 })
+    }
+  }, [batchStopping, projects, selectedProjectIds, showToast, t])
 
   useEffect(() => {
     const loadShortcuts = async () => {
@@ -354,12 +399,27 @@ const Projects: React.FC = () => {
     const start = performance.now()
     try {
       const missingProjects = shortcut.projects.filter(item => !projectMap.has(item.id))
-      const availableProjectIds = shortcut.projects.filter(item => projectMap.has(item.id)).map(item => item.id)
+      const availableProjects = shortcut.projects.filter(item => projectMap.has(item.id))
+      const availableProjectIds = availableProjects.map(item => item.id)
       if (appendMode) {
         setSelectedProjectIds(prev => Array.from(new Set([...prev, ...availableProjectIds])))
       } else {
         setSelectedProjectIds(availableProjectIds)
       }
+      await Promise.all(
+        availableProjects.map(async (item) => {
+          if (typeof item.autoRefreshLogs !== 'boolean') {
+            return
+          }
+          const current = projectMap.get(item.id)
+          if (!current) {
+            return
+          }
+          if (!!current.autoRefreshLogs !== item.autoRefreshLogs) {
+            await toggleAutoRefreshLogs(item.id)
+          }
+        })
+      )
 
       const cost = Math.round(performance.now() - start)
       if (missingProjects.length > 0) {
@@ -480,6 +540,67 @@ const Projects: React.FC = () => {
     await loadProjects()
     setBatchStarting(false)
     showToast('success', t('projects.shortcuts.batchDoneTitle'), t('projects.shortcuts.batchDoneDesc', { successCount, failedCount }))
+  }
+
+  const handleBatchStopSelected = async () => {
+    if (selectedProjectIds.length === 0) {
+      showToast('info', t('projects.shortcuts.selectNoneTitle'), t('projects.shortcuts.batchSelectHint'))
+      return
+    }
+
+    const runningSelected = selectedProjectIds.filter(projectId => projectMap.get(projectId)?.status === 'running')
+    if (runningSelected.length === 0) {
+      showToast('info', t('projects.bulkStopResult'), t('projects.noRunningSelected'))
+      return
+    }
+
+    batchStopToastSentRef.current = false
+    setBatchStopping(true)
+    setBatchProgress({
+      total: runningSelected.length,
+      done: 0,
+      success: 0,
+      failed: 0
+    })
+
+    const stopProjectWithTimeout = async (projectId: string): Promise<boolean> => {
+      const timeoutPromise = new Promise<boolean>(resolve => {
+        setTimeout(() => resolve(false), 10000)
+      })
+      return Promise.race([stopProject(projectId), timeoutPromise])
+    }
+
+    let successCount = 0
+    let failedCount = 0
+    try {
+      await Promise.all(runningSelected.map(async (projectId) => {
+        const success = await stopProjectWithTimeout(projectId)
+        if (success) {
+          successCount += 1
+        } else {
+          failedCount += 1
+        }
+        setBatchProgress(prev => ({
+          total: prev.total,
+          done: prev.done + 1,
+          success: prev.success + (success ? 1 : 0),
+          failed: prev.failed + (success ? 0 : 1)
+        }))
+      }))
+
+      setBatchStopping(false)
+      setBatchProgress({ total: 0, done: 0, success: 0, failed: 0 })
+      void loadProjects()
+      if (failedCount > 0) {
+        showToast('info', t('projects.bulkStopResult'), t('projects.bulkStartDesc', { success: successCount, failed: failedCount }))
+      }
+    } catch (error) {
+      console.error('Error stopping selected projects:', error)
+      showToast('error', t('projects.bulkStopResult'), t('errors.unknownError'))
+    } finally {
+      setBatchStopping(false)
+      setBatchProgress({ total: 0, done: 0, success: 0, failed: 0 })
+    }
   }
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>, projectId: string) => {
@@ -608,6 +729,9 @@ const Projects: React.FC = () => {
   const canDragSort = searchTerm.trim() === '' && statusFilter === 'all'
   const allFilteredSelected = filteredProjects.length > 0 && filteredProjects.every(project => selectedProjectIds.includes(project.id))
   const progressPercent = batchProgress.total === 0 ? 0 : Math.round((batchProgress.done / batchProgress.total) * 100)
+  const hasRunningSelected = selectedProjectIds.some(projectId => projectMap.get(projectId)?.status === 'running')
+  const isBatchProcessing = batchStarting || batchStopping
+  const batchStopMode = batchStopping || (!isBatchProcessing && hasRunningSelected)
 
   if (loading && projects.length === 0) {
     return (
@@ -1063,10 +1187,10 @@ const Projects: React.FC = () => {
         </div>
       )}
 
-      {(batchStarting || batchProgress.total > 0) && (
+      {(batchStarting || batchStopping || batchProgress.total > 0) && (
         <div className="bg-card border border-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">{t('projects.shortcuts.batchProgressTitle')}</span>
+            <span className="text-sm font-medium">{batchStopping ? t('projects.shortcuts.batchStopProgressTitle') : t('projects.shortcuts.batchProgressTitle')}</span>
             <span className="text-sm text-muted-foreground">{progressPercent}%</span>
           </div>
           <div className="h-2 bg-secondary rounded-full overflow-hidden">
@@ -1085,12 +1209,26 @@ const Projects: React.FC = () => {
 
       <div className="sticky bottom-3 z-10">
         <button
-          onClick={() => void handleBatchStartSelected()}
-          disabled={batchStarting || selectedCount === 0}
-          className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => {
+            if (batchStopMode) {
+              void handleBatchStopSelected()
+              return
+            }
+            void handleBatchStartSelected()
+          }}
+          disabled={isBatchProcessing || selectedCount === 0}
+          className={`w-full flex items-center justify-center space-x-2 px-4 py-3 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            batchStopMode ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+          }`}
         >
-          {batchStarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          <span>{batchStarting ? t('projects.shortcuts.batchStartingButton') : t('projects.shortcuts.batchStartButton')}</span>
+          {isBatchProcessing ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : batchStopMode ? (
+            <Square className="w-4 h-4" />
+          ) : (
+            <Play className="w-4 h-4" />
+          )}
+          <span>{isBatchProcessing ? (batchStopping ? t('projects.shortcuts.batchStoppingButton') : t('projects.shortcuts.batchStartingButton')) : (batchStopMode ? t('projects.shortcuts.batchStopButton') : t('projects.shortcuts.batchStartButton'))}</span>
         </button>
       </div>
 

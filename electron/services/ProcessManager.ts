@@ -1,4 +1,6 @@
 import { spawn, ChildProcess } from 'child_process'
+import { existsSync, readFileSync, rmSync } from 'fs'
+import { join } from 'path'
 import { Project } from './ProjectManager'
 import { LogManager } from './LogManager'
 
@@ -44,10 +46,14 @@ export class ProcessManager {
       })
 
       // 构建命令
-      const command = this.buildCommand(project.packageManager, project.startCommand)
+      let command = this.buildCommand(project.packageManager, project.startCommand)
+      if (this.shouldUseViteConfigRunner(project)) {
+        command = this.applyViteConfigRunner(command, project.packageManager)
+      }
       console.log('[ProcessManager] Starting command:', command.cmd, command.args.join(' '))
       console.log('[ProcessManager] Working directory:', project.path)
       console.log('[ProcessManager] Environment NODE_ENV:', process.env.NODE_ENV || 'undefined')
+      this.clearViteTempCache(project.id, project.path)
       
       // 启动进程
       const childProcess = spawn(command.cmd, command.args, {
@@ -471,6 +477,7 @@ export class ProcessManager {
 
   private extractAndSaveUrl(projectId: string, message: string): void {
     console.log(`[ProcessManager] Checking message for URL patterns: "${message}"`)
+    const normalizedMessage = this.cleanLogMessage(message)
     
     // 检测常见的开发服务器 URL 模式
     const urlPatterns = [
@@ -485,11 +492,15 @@ export class ProcessManager {
       // 通用模式: http://localhost:端口
       /https?:\/\/localhost:\d+\/?/i,
       // 通用模式: http://127.0.0.1:端口
-      /https?:\/\/127\.0\.0\.1:\d+\/?/i
+      /https?:\/\/127\.0\.0\.1:\d+\/?/i,
+      // 通用模式: http://0.0.0.0:端口
+      /https?:\/\/0\.0\.0\.0:\d+\/?/i,
+      // 通用模式: http://[::1]:端口
+      /https?:\/\/\[\:\:1\]:\d+\/?/i
     ]
 
     for (const pattern of urlPatterns) {
-      const match = message.match(pattern)
+      const match = normalizedMessage.match(pattern)
       if (match) {
         let url = match[0]
         console.log(`[ProcessManager] Found URL match: "${url}" using pattern: ${pattern}`)
@@ -523,14 +534,29 @@ export class ProcessManager {
           message: `🌐 项目已启动，访问地址: ${url}`
         })
         
-        break // 找到第一个匹配的 URL 就停止
+        return
       }
     }
+
+    const startedPortMatch = normalizedMessage.match(/started server on [^:]+:(\d+)/i)
+    if (startedPortMatch) {
+      const port = parseInt(startedPortMatch[1], 10)
+      const url = `http://localhost:${port}/`
+      if (this.onUrlDetected) {
+        this.onUrlDetected(projectId, url, port)
+      }
+      this.logManager.addLog(projectId, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: `🌐 项目已启动，访问地址: ${url}`
+      })
+      return
+    }
     
-    if (!message.match(/Local:|url:|localhost|127\.0\.0\.1/i)) {
+    if (!normalizedMessage.match(/Local:|url:|localhost|127\.0\.0\.1|0\.0\.0\.0|started server on/i)) {
       // 只有当消息不包含任何URL相关关键词时才跳过日志
     } else {
-      console.log(`[ProcessManager] No URL pattern matched for message: "${message}"`)
+      console.log(`[ProcessManager] No URL pattern matched for message: "${normalizedMessage}"`)
     }
   }
 
@@ -652,5 +678,173 @@ export class ProcessManager {
     const enhancedPath = uniquePaths.join(pathSeparator)
     console.log(`[ProcessManager] Enhanced PATH: ${enhancedPath}`)
     return enhancedPath
+  }
+
+  private clearViteTempCache(projectId: string, projectPath: string): void {
+    try {
+      const viteTempPath = join(projectPath, 'node_modules', '.vite-temp')
+      if (!existsSync(viteTempPath)) {
+        return
+      }
+      rmSync(viteTempPath, { recursive: true, force: true })
+      this.logManager.addLog(projectId, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: 'Cleared Vite temporary cache before project start'
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      this.logManager.addLog(projectId, {
+        timestamp: new Date().toISOString(),
+        level: 'warn',
+        message: `Failed to clear Vite temporary cache: ${errorMessage}`
+      })
+    }
+  }
+
+  private shouldUseViteConfigRunner(project: Project): boolean {
+    const commandText = project.startCommand.trim()
+    if (!commandText) {
+      return false
+    }
+    if (commandText.toLowerCase().includes('--configloader')) {
+      return false
+    }
+
+    const viteMajor = this.getViteMajorVersion(project.path)
+    if (!viteMajor || viteMajor < 6) {
+      return false
+    }
+
+    if (this.isDirectViteCommand(commandText)) {
+      return true
+    }
+
+    const scriptName = this.resolveScriptName(project.packageManager, commandText)
+    if (!scriptName) {
+      return false
+    }
+
+    const scriptContent = this.getScriptContent(project.path, scriptName)
+    if (!scriptContent) {
+      return false
+    }
+
+    return scriptContent.toLowerCase().includes('vite')
+  }
+
+  private getViteMajorVersion(projectPath: string): number | null {
+    try {
+      const packageJsonPath = join(projectPath, 'package.json')
+      if (!existsSync(packageJsonPath)) {
+        return null
+      }
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+      const viteVersionRaw = packageJson?.devDependencies?.vite || packageJson?.dependencies?.vite
+      if (typeof viteVersionRaw !== 'string') {
+        return null
+      }
+      const versionMatch = viteVersionRaw.match(/\d+/)
+      if (!versionMatch) {
+        return null
+      }
+      const major = parseInt(versionMatch[0], 10)
+      return Number.isFinite(major) ? major : null
+    } catch {
+      return null
+    }
+  }
+
+  private isDirectViteCommand(commandText: string): boolean {
+    const tokens = commandText.toLowerCase().split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) {
+      return false
+    }
+    if (tokens[0].includes('vite')) {
+      return true
+    }
+    return tokens[0] === 'npx' && tokens[1]?.includes('vite') === true
+  }
+
+  private resolveScriptName(packageManager: string, commandText: string): string | null {
+    const tokens = commandText.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) {
+      return null
+    }
+
+    if (tokens.length === 1) {
+      return tokens[0]
+    }
+
+    const firstToken = tokens[0].toLowerCase()
+    if (firstToken.includes('pnpm') || firstToken.includes('npm')) {
+      if (tokens[1] === 'run' && tokens[2]) {
+        return tokens[2]
+      }
+      if (tokens[1] && !tokens[1].startsWith('-')) {
+        return tokens[1]
+      }
+      return null
+    }
+
+    if (firstToken.includes('yarn')) {
+      if (tokens[1] === 'run' && tokens[2]) {
+        return tokens[2]
+      }
+      if (tokens[1] && !tokens[1].startsWith('-')) {
+        return tokens[1]
+      }
+      return null
+    }
+
+    if (packageManager === 'yarn' || packageManager === 'npm' || packageManager === 'pnpm') {
+      return tokens[0]
+    }
+
+    return null
+  }
+
+  private getScriptContent(projectPath: string, scriptName: string): string | null {
+    try {
+      const packageJsonPath = join(projectPath, 'package.json')
+      if (!existsSync(packageJsonPath)) {
+        return null
+      }
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+      const script = packageJson?.scripts?.[scriptName]
+      return typeof script === 'string' ? script : null
+    } catch {
+      return null
+    }
+  }
+
+  private applyViteConfigRunner(
+    command: { cmd: string; args: string[] },
+    packageManager: string
+  ): { cmd: string; args: string[] } {
+    if (command.args.some(arg => arg.toLowerCase() === '--configloader')) {
+      return command
+    }
+
+    const lowerCmd = command.cmd.toLowerCase().replace(/"/g, '')
+    const isDirectVite = lowerCmd.includes('vite')
+    if (isDirectVite) {
+      return {
+        cmd: command.cmd,
+        args: [...command.args, '--configLoader', 'runner']
+      }
+    }
+
+    if (lowerCmd.includes('yarn') || packageManager === 'yarn') {
+      return {
+        cmd: command.cmd,
+        args: [...command.args, '--configLoader', 'runner']
+      }
+    }
+
+    return {
+      cmd: command.cmd,
+      args: [...command.args, '--', '--configLoader', 'runner']
+    }
   }
 }

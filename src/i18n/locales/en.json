@@ -155,9 +155,13 @@
       "batchDoneTitle": "Batch start completed",
       "batchDoneDesc": "Success {{successCount}}, Failed {{failedCount}}",
       "batchProgressTitle": "Start Progress",
+      "batchStopProgressTitle": "Stop Progress",
       "batchProgressSummary": "Total {{total}}, Done {{done}}, Success {{success}}, Failed {{failed}}",
       "batchStartButton": "Start Selected Projects",
+      "batchStopButton": "Stop Selected Projects",
       "batchStartingButton": "Starting...",
+      "batchStoppingButton": "Stopping...",
+      "batchStopDoneDesc": "Selected projects stopped",
       "validation": {
         "required": "Name is required",
         "maxLength": "Name must be 20 characters or less",

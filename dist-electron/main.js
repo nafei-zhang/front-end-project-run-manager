@@ -184,10 +184,14 @@ class ProcessManager {
         level: "info",
         message: "Logs cleared before project start"
       });
-      const command = this.buildCommand(project.packageManager, project.startCommand);
+      let command = this.buildCommand(project.packageManager, project.startCommand);
+      if (this.shouldUseViteConfigRunner(project)) {
+        command = this.applyViteConfigRunner(command, project.packageManager);
+      }
       console.log("[ProcessManager] Starting command:", command.cmd, command.args.join(" "));
       console.log("[ProcessManager] Working directory:", project.path);
       console.log("[ProcessManager] Environment NODE_ENV:", process.env.NODE_ENV || "undefined");
+      this.clearViteTempCache(project.id, project.path);
       const childProcess = child_process.spawn(command.cmd, command.args, {
         cwd: project.path,
         stdio: ["pipe", "pipe", "pipe"],
@@ -509,6 +513,7 @@ class ProcessManager {
   }
   extractAndSaveUrl(projectId, message) {
     console.log(`[ProcessManager] Checking message for URL patterns: "${message}"`);
+    const normalizedMessage = this.cleanLogMessage(message);
     const urlPatterns = [
       // Vite: Local: http://localhost:5173/
       /Local:\s*https?:\/\/[^\s]+/i,
@@ -521,10 +526,14 @@ class ProcessManager {
       // 通用模式: http://localhost:端口
       /https?:\/\/localhost:\d+\/?/i,
       // 通用模式: http://127.0.0.1:端口
-      /https?:\/\/127\.0\.0\.1:\d+\/?/i
+      /https?:\/\/127\.0\.0\.1:\d+\/?/i,
+      // 通用模式: http://0.0.0.0:端口
+      /https?:\/\/0\.0\.0\.0:\d+\/?/i,
+      // 通用模式: http://[::1]:端口
+      /https?:\/\/\[\:\:1\]:\d+\/?/i
     ];
     for (const pattern of urlPatterns) {
-      const match = message.match(pattern);
+      const match = normalizedMessage.match(pattern);
       if (match) {
         let url = match[0];
         console.log(`[ProcessManager] Found URL match: "${url}" using pattern: ${pattern}`);
@@ -546,13 +555,27 @@ class ProcessManager {
           level: "info",
           message: `🌐 项目已启动，访问地址: ${url}`
         });
-        break;
+        return;
       }
     }
-    if (!message.match(/Local:|url:|localhost|127\.0\.0\.1/i))
+    const startedPortMatch = normalizedMessage.match(/started server on [^:]+:(\d+)/i);
+    if (startedPortMatch) {
+      const port = parseInt(startedPortMatch[1], 10);
+      const url = `http://localhost:${port}/`;
+      if (this.onUrlDetected) {
+        this.onUrlDetected(projectId, url, port);
+      }
+      this.logManager.addLog(projectId, {
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        level: "info",
+        message: `🌐 项目已启动，访问地址: ${url}`
+      });
+      return;
+    }
+    if (!normalizedMessage.match(/Local:|url:|localhost|127\.0\.0\.1|0\.0\.0\.0|started server on/i))
       ;
     else {
-      console.log(`[ProcessManager] No URL pattern matched for message: "${message}"`);
+      console.log(`[ProcessManager] No URL pattern matched for message: "${normalizedMessage}"`);
     }
   }
   setUrlDetectedCallback(callback) {
@@ -644,6 +667,154 @@ class ProcessManager {
     const enhancedPath = uniquePaths.join(pathSeparator);
     console.log(`[ProcessManager] Enhanced PATH: ${enhancedPath}`);
     return enhancedPath;
+  }
+  clearViteTempCache(projectId, projectPath) {
+    try {
+      const viteTempPath = path.join(projectPath, "node_modules", ".vite-temp");
+      if (!fs.existsSync(viteTempPath)) {
+        return;
+      }
+      fs.rmSync(viteTempPath, { recursive: true, force: true });
+      this.logManager.addLog(projectId, {
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        level: "info",
+        message: "Cleared Vite temporary cache before project start"
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      this.logManager.addLog(projectId, {
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        level: "warn",
+        message: `Failed to clear Vite temporary cache: ${errorMessage}`
+      });
+    }
+  }
+  shouldUseViteConfigRunner(project) {
+    const commandText = project.startCommand.trim();
+    if (!commandText) {
+      return false;
+    }
+    if (commandText.toLowerCase().includes("--configloader")) {
+      return false;
+    }
+    const viteMajor = this.getViteMajorVersion(project.path);
+    if (!viteMajor || viteMajor < 6) {
+      return false;
+    }
+    if (this.isDirectViteCommand(commandText)) {
+      return true;
+    }
+    const scriptName = this.resolveScriptName(project.packageManager, commandText);
+    if (!scriptName) {
+      return false;
+    }
+    const scriptContent = this.getScriptContent(project.path, scriptName);
+    if (!scriptContent) {
+      return false;
+    }
+    return scriptContent.toLowerCase().includes("vite");
+  }
+  getViteMajorVersion(projectPath) {
+    var _a, _b;
+    try {
+      const packageJsonPath = path.join(projectPath, "package.json");
+      if (!fs.existsSync(packageJsonPath)) {
+        return null;
+      }
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+      const viteVersionRaw = ((_a = packageJson == null ? void 0 : packageJson.devDependencies) == null ? void 0 : _a.vite) || ((_b = packageJson == null ? void 0 : packageJson.dependencies) == null ? void 0 : _b.vite);
+      if (typeof viteVersionRaw !== "string") {
+        return null;
+      }
+      const versionMatch = viteVersionRaw.match(/\d+/);
+      if (!versionMatch) {
+        return null;
+      }
+      const major = parseInt(versionMatch[0], 10);
+      return Number.isFinite(major) ? major : null;
+    } catch {
+      return null;
+    }
+  }
+  isDirectViteCommand(commandText) {
+    var _a;
+    const tokens = commandText.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) {
+      return false;
+    }
+    if (tokens[0].includes("vite")) {
+      return true;
+    }
+    return tokens[0] === "npx" && ((_a = tokens[1]) == null ? void 0 : _a.includes("vite")) === true;
+  }
+  resolveScriptName(packageManager, commandText) {
+    const tokens = commandText.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) {
+      return null;
+    }
+    if (tokens.length === 1) {
+      return tokens[0];
+    }
+    const firstToken = tokens[0].toLowerCase();
+    if (firstToken.includes("pnpm") || firstToken.includes("npm")) {
+      if (tokens[1] === "run" && tokens[2]) {
+        return tokens[2];
+      }
+      if (tokens[1] && !tokens[1].startsWith("-")) {
+        return tokens[1];
+      }
+      return null;
+    }
+    if (firstToken.includes("yarn")) {
+      if (tokens[1] === "run" && tokens[2]) {
+        return tokens[2];
+      }
+      if (tokens[1] && !tokens[1].startsWith("-")) {
+        return tokens[1];
+      }
+      return null;
+    }
+    if (packageManager === "yarn" || packageManager === "npm" || packageManager === "pnpm") {
+      return tokens[0];
+    }
+    return null;
+  }
+  getScriptContent(projectPath, scriptName) {
+    var _a;
+    try {
+      const packageJsonPath = path.join(projectPath, "package.json");
+      if (!fs.existsSync(packageJsonPath)) {
+        return null;
+      }
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+      const script = (_a = packageJson == null ? void 0 : packageJson.scripts) == null ? void 0 : _a[scriptName];
+      return typeof script === "string" ? script : null;
+    } catch {
+      return null;
+    }
+  }
+  applyViteConfigRunner(command, packageManager) {
+    if (command.args.some((arg) => arg.toLowerCase() === "--configloader")) {
+      return command;
+    }
+    const lowerCmd = command.cmd.toLowerCase().replace(/"/g, "");
+    const isDirectVite = lowerCmd.includes("vite");
+    if (isDirectVite) {
+      return {
+        cmd: command.cmd,
+        args: [...command.args, "--configLoader", "runner"]
+      };
+    }
+    if (lowerCmd.includes("yarn") || packageManager === "yarn") {
+      return {
+        cmd: command.cmd,
+        args: [...command.args, "--configLoader", "runner"]
+      };
+    }
+    return {
+      cmd: command.cmd,
+      args: [...command.args, "--", "--configLoader", "runner"]
+    };
   }
 }
 class LogManager {
@@ -1158,7 +1329,8 @@ const _ShortcutConfigManager = class _ShortcutConfigManager {
       name: String(project.name),
       path: String(project.path),
       packageManager: ["npm", "pnpm", "yarn"].includes(project.packageManager) ? project.packageManager : "npm",
-      startCommand: String(project.startCommand)
+      startCommand: String(project.startCommand),
+      autoRefreshLogs: typeof project.autoRefreshLogs === "boolean" ? project.autoRefreshLogs : void 0
     }));
     if (normalizedProjects.length === 0) {
       return null;
@@ -1261,10 +1433,17 @@ function initializeServices() {
   processManager = new ProcessManager(logManager);
   processManager.setUrlDetectedCallback((projectId, url, port) => {
     console.log(`[Main] URL detected for project ${projectId}: ${url}`);
-    projectManager.updateProject(projectId, {
+    const updatedProject = projectManager.updateProject(projectId, {
       url,
       port
     });
+    if (mainWindow && updatedProject) {
+      try {
+        mainWindow.webContents.send("projects:projectUpdated", updatedProject);
+      } catch (err) {
+        console.warn("[Main] Failed to send projects:projectUpdated:", err);
+      }
+    }
   });
   processManager.setProjectStatusChangeCallback((projectId, status) => {
     console.log(`[Main] Project status change for ${projectId}: ${status}`);
@@ -1415,7 +1594,8 @@ function setupIpcHandlers() {
       name: project.name,
       path: project.path,
       packageManager: project.packageManager,
-      startCommand: project.startCommand
+      startCommand: project.startCommand,
+      autoRefreshLogs: !!project.autoRefreshLogs
     }));
     return shortcutConfigManager.createShortcut(name, selectedProjects);
   });

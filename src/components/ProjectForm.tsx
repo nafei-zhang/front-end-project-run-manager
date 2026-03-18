@@ -196,7 +196,7 @@ const ProjectForm: React.FC<ProjectFormProps> = ({ project, onClose, onSuccess }
               type="text"
               value={formData.startCommand}
               onChange={(e) => handleInputChange('startCommand', e.target.value)}
-              placeholder="npm run dev"
+              placeholder={t('projectForm.startCommandPlaceholder')}
               className={`w-full px-3 py-2 bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary ${
                 errors.startCommand ? 'border-red-500' : 'border-border'
               }`}
