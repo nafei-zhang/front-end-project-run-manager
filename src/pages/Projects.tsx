@@ -1207,29 +1207,38 @@ const Projects: React.FC = () => {
         </div>
       )}
 
-      <div className="sticky bottom-3 z-10">
-        <button
-          onClick={() => {
-            if (batchStopMode) {
-              void handleBatchStopSelected()
-              return
-            }
-            void handleBatchStartSelected()
-          }}
-          disabled={isBatchProcessing || selectedCount === 0}
-          className={`w-full flex items-center justify-center space-x-2 px-4 py-3 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            batchStopMode ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-          }`}
-        >
-          {isBatchProcessing ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : batchStopMode ? (
-            <Square className="w-4 h-4" />
-          ) : (
-            <Play className="w-4 h-4" />
-          )}
-          <span>{isBatchProcessing ? (batchStopping ? t('projects.shortcuts.batchStoppingButton') : t('projects.shortcuts.batchStartingButton')) : (batchStopMode ? t('projects.shortcuts.batchStopButton') : t('projects.shortcuts.batchStartButton'))}</span>
-        </button>
+      <div className="fixed inset-x-0 bottom-0 z-40 bg-card border-t border-border shadow-lg">
+        <div className="w-full px-6 py-3 flex items-center justify-end">
+          <button
+            onClick={() => {
+              if (batchStopMode) {
+                void handleBatchStopSelected()
+                return
+              }
+              void handleBatchStartSelected()
+            }}
+            disabled={isBatchProcessing || selectedCount === 0}
+            className={`flex items-center space-x-2 px-5 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              batchStopMode ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'
+            }`}
+          >
+            {isBatchProcessing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : batchStopMode ? (
+              <Square className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+            <span className="font-medium">
+              {isBatchProcessing
+                ? (batchStopping ? t('projects.shortcuts.batchStoppingButton') : t('projects.shortcuts.batchStartingButton'))
+                : (batchStopMode ? t('projects.shortcuts.batchStopButton') : t('projects.shortcuts.batchStartButton'))}
+            </span>
+            {selectedCount > 0 && (
+              <span className="text-xs opacity-80">({selectedCount})</span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* 项目表单模态框 */}
